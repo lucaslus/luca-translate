@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>lucas-translate 偏好设置</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* ---------- 设置窗口布局：侧边栏 + 内容面板 ---------- */
+    html, body { height: 100%; overflow: hidden; }
+    .settings { display: flex; height: 100%; }
+    /* 侧边栏通顶：macOS 下为红绿灯留出顶部空间 */
+    .side { padding-top: 0; }
+    body.mac .side { padding-top: 42px; }
+    .side .brand { -webkit-user-select: none; user-select: none; }
+
+    /* 侧边栏 */
+    .side {
+      width: 158px;
+      flex-shrink: 0;
+      background: var(--bg-sunken);
+      border-right: 1px solid var(--border);
+      padding: 12px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      user-select: none;
+    }
+    .side .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px 12px;
+    }
+    .side .brand .name { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: none;
+      background: none;
+      color: var(--text-2);
+      font-size: 12.5px;
+      font-weight: 500;
+      font-family: inherit;
+      text-align: left;
+      padding: 6px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+    }
+    .nav-item .icon { font-size: 16px; color: var(--text-3); transition: color var(--dur) var(--ease); }
+    .nav-item:hover { background: var(--bg-hover); color: var(--text-1); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+    .nav-item.active .icon { color: var(--accent); }
+    .side .spacer { flex: 1; }
+
+    /* 内容面板 */
+    .content { flex: 1; overflow-y: auto; padding: 18px 22px 26px; }
+    .view { display: none; max-width: 480px; }
+    .view.active { display: block; animation: view-in var(--dur) var(--ease); }
+    @keyframes view-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    .view-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 14px;
+    }
+
+    /* 分组卡片：macOS 系统设置式内嵌列表 */
+    .group {
+      border: 1px solid var(--border);
+      border-radius: var(--r-card);
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      min-height: 44px;
+      background: var(--bg);
+    }
+    .row + .row { border-top: 1px solid var(--border); }
+    .row .label { flex: 1; min-width: 0; }
+    .row .label .t { font-size: 13px; font-weight: 500; }
+    .row .label .d { font-size: 11.5px; color: var(--text-2); margin-top: 2px; line-height: 1.5; }
+    .row .label .d code {
+      font-family: var(--font-mono); font-size: 10.5px;
+      background: var(--bg-sunken); padding: 1px 5px; border-radius: 4px;
+    }
+    .row .label .d b { color: var(--text-1); font-weight: 600; }
+
+    /* 行内控件 */
+    .state-chip {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+    .state-chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+    .state-chip.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+    .btn {
+      background: var(--bg);
+      color: var(--text-1);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--r-chip);
+      padding: 4px 11px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all var(--dur) var(--ease);
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { filter: brightness(1.08); color: #fff; }
+
+    /* 规则编辑 */
+    .group-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 18px 0 6px;
+    }
+    .rule-hint {
+      font-size: 11.5px;
+      color: var(--text-2);
+      margin-bottom: 8px;
+      line-height: 1.6;
+    }
+    .rule-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+    }
+    .rule-row .arrow { color: var(--text-3); font-size: 12px; }
+    .mini-select {
+      background: var(--bg-sunken);
+      border: 1px solid var(--border);
+      border-radius: var(--r-chip);
+      color: var(--text-1);
+      font-size: 12px;
+      font-family: inherit;
+      padding: 4px 8px;
+      outline: none;
+      cursor: pointer;
+      flex: 1;
+    }
+    .mini-select:focus { border-color: var(--accent); }
+    .rule-del {
+      background: none;
+      border: none;
+      color: var(--text-3);
+      cursor: pointer;
+      border-radius: 6px;
+      padding: 3px 6px;
+    }
+    .rule-del:hover { color: var(--danger); background: var(--bg-hover); }
+
+    /* 分段控件（主题选择） */
+    .segmented {
+      display: flex;
+      background: var(--bg-sunken);
+      border-radius: 8px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .segmented button {
+      border: none;
+      background: none;
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      padding: 4px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all var(--dur) var(--ease);
+    }
+    .segmented button.active {
+      background: var(--bg);
+      color: var(--text-1);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    .segmented button .icon { font-size: 14px; }
+
+    /* 开关 */
+    .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0; background: var(--border-strong);
+      border-radius: 22px; cursor: pointer; transition: var(--dur) var(--ease);
+    }
+    .slider:before {
+      content: ""; position: absolute; width: 16px; height: 16px;
+      left: 3px; top: 3px; background: #fff; border-radius: 50%;
+      transition: var(--dur) var(--ease); box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    }
+    .switch input:checked + .slider { background: var(--accent); }
+    .switch input:checked + .slider:before { transform: translateX(16px); }
+
+    /* 表单行（AI 配置） */
+    .field { padding: 10px 14px; }
+    .field + .field { border-top: 1px solid var(--border); }
+    .field .f-label {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-2);
+      margin-bottom: 5px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .field input {
+      width: 100%;
+      background: var(--bg-sunken);
+      border: 1px solid transparent;
+      border-radius: var(--r-chip);
+      padding: 7px 10px;
+      color: var(--text-1);
+      font-size: 12px;
+      font-family: var(--font-mono);
+      outline: none;
+      transition: all var(--dur) var(--ease);
+    }
+    .field input:focus { border-color: var(--accent); background: var(--bg); }
+    .field input::placeholder { color: var(--text-3); font-family: var(--font-ui); }
+
+    /* 快捷键表 */
+    .hk { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .hk td { padding: 8px 14px; border-top: 1px solid var(--border); color: var(--text-1); }
+    .hk tr:first-child td { border-top: none; }
+    .hk td:first-child { width: 130px; }
+    kbd {
+      font-family: var(--font-mono);
+      background: var(--bg-sunken); border: 1px solid var(--border);
+      border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px;
+      font-size: 10.5px; margin-right: 2px;
+    }
+    .about-line { display: flex; justify-content: space-between; padding: 10px 14px; font-size: 12.5px; }
+    .about-line + .about-line { border-top: 1px solid var(--border); }
+    .about-line .k { color: var(--text-2); }
+    .about-line .v { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-1); }
+  </style>
+</head>
+<body>
+  <div class="settings">
+    <!-- 侧边栏 -->
+    <nav class="side">
+      <div class="brand"><span class="name">设置</span></div>
+      <button class="nav-item active" data-view="general"><span class="icon">tune</span>通用</button>
+      <button class="nav-item" data-view="services"><span class="icon">translate</span>翻译服务</button>
+      <button class="nav-item" data-view="permissions"><span class="icon">verified_user</span>权限</button>
+      <button class="nav-item" data-view="hotkeys"><span class="icon">keyboard</span>快捷键</button>
+      <div class="spacer"></div>
+      <button class="nav-item" data-view="about"><span class="icon">info</span>关于</button>
+    </nav>
+
+    <!-- 内容 -->
+    <main class="content">
+      <!-- 通用 -->
+      <section class="view active" id="view-general">
+        <div class="view-title">通用</div>
+        <div class="group">
+          <div class="row">
+            <div class="label"><div class="t">外观</div><div class="d">界面主题，跟随系统时自动切换明暗</div></div>
+            <div class="segmented" id="theme-seg">
+              <button data-theme="system">系统</button>
+              <button data-theme="light"><span class="icon">light_mode</span>浅色</button>
+              <button data-theme="dark"><span class="icon">dark_mode</span>深色</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="label"><div class="t">开机自启</div><div class="d">登录 macOS 后自动在后台启动</div></div>
+            <label class="switch"><input type="checkbox" id="autostart" /><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <div class="group-title">规则匹配</div>
+        <div class="rule-hint">
+          主页目标语言为「规则匹配」时，按检测到的源语言自上而下匹配以下规则；未命中则使用底部默认目标。
+        </div>
+        <div class="group" id="rule-list"></div>
+        <div class="group">
+          <div class="row">
+            <div class="label"><div class="t">其他语言</div><div class="d">未命中以上规则时的默认目标语言</div></div>
+            <select class="mini-select" id="rule-fallback"></select>
+          </div>
+          <div class="row">
+            <div class="label"><div class="d" style="margin-top:0">改动自动保存，下次翻译立即生效</div></div>
+            <button class="btn" id="rule-add">+ 添加规则</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 翻译服务 -->
+      <section class="view" id="view-services">
+        <div class="view-title">翻译服务</div>
+        <div class="group" id="svc-list"></div>
+        <div class="group">
+          <div class="row">
+            <div class="label"><div class="t">系统内置翻译</div><div class="d">调用 macOS 系统翻译能力 — 即将支持</div></div>
+            <label class="switch"><input type="checkbox" disabled /><span class="slider" style="opacity:.4"></span></label>
+          </div>
+        </div>
+        <div class="rule-hint">所有服务免配置即可用；并行查询，先返回先展示，单个渠道失败不影响其他结果。</div>
+        <div class="group">
+          <div class="row" style="border-top:none">
+            <div class="label"><div class="t">AI 翻译（OpenAI 兼容）</div><div class="d">接入 DeepSeek / Kimi / 智谱 / Ollama 等，与免费服务并行出结果</div></div>
+            <label class="switch"><input type="checkbox" id="ai-enabled" /><span class="slider"></span></label>
+          </div>
+          <div class="field">
+            <div class="f-label"><span>Base URL</span></div>
+            <input type="text" id="ai-base-url" placeholder="https://api.deepseek.com/v1" />
+          </div>
+          <div class="field">
+            <div class="f-label"><span>API Key</span><span>本地 Ollama 可留空</span></div>
+            <input type="password" id="ai-key" placeholder="sk-..." />
+          </div>
+          <div class="field">
+            <div class="f-label"><span>模型</span></div>
+            <input type="text" id="ai-model" placeholder="deepseek-chat / qwen2.5:7b" />
+          </div>
+          <div class="field" style="display:flex;justify-content:flex-end">
+            <button class="btn primary" id="ai-save">保存</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 权限 -->
+      <section class="view" id="view-permissions">
+        <div class="view-title">权限</div>
+        <div class="group">
+          <div class="row">
+            <div class="label">
+              <div class="t">辅助功能</div>
+              <div class="d">「划词翻译 <code>⌥D</code>」需要模拟 <code>⌘C</code> 获取选中文本</div>
+            </div>
+            <span class="state-chip" id="chip-accessibility">检测中</span>
+            <button class="btn" id="open-accessibility">打开</button>
+          </div>
+          <div class="row">
+            <div class="label">
+              <div class="t">屏幕录制</div>
+              <div class="d">「截图 OCR <code>⌥S</code> / <code>⌥C</code>」本地离线识别，不上传。授权后需重启应用</div>
+            </div>
+            <span class="state-chip" id="chip-screen">检测中</span>
+            <button class="btn" id="open-screen">打开</button>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="btn" id="refresh"><span class="icon" style="font-size:13px;vertical-align:-2px">refresh</span> 重新检测</button>
+        </div>
+      </section>
+
+      <!-- 快捷键 -->
+      <section class="view" id="view-hotkeys">
+        <div class="view-title">快捷键</div>
+        <div class="group">
+          <table class="hk">
+            <tr><td><kbd>⌥</kbd><kbd>A</kbd></td><td>输入翻译</td></tr>
+            <tr><td><kbd>⌥</kbd><kbd>D</kbd></td><td>划词翻译</td></tr>
+            <tr><td><kbd>⌥</kbd><kbd>S</kbd></td><td>截图翻译（OCR）</td></tr>
+            <tr><td><kbd>⌥</kbd><kbd>C</kbd></td><td>静默截图 OCR</td></tr>
+            <tr><td><kbd>↩</kbd></td><td>翻译</td></tr>
+            <tr><td><kbd>⎋</kbd></td><td>清空 / 关闭面板</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <!-- 关于 -->
+      <section class="view" id="view-about">
+        <div class="view-title">关于</div>
+        <div class="group">
+          <div class="about-line"><span class="k">应用</span><span class="v">lucas-translate</span></div>
+          <div class="about-line"><span class="k">版本</span><span class="v">0.1.0 (dev)</span></div>
+          <div class="about-line"><span class="k">许可证</span><span class="v">MIT</span></div>
+          <div class="about-line"><span class="k">能力</span><span class="v">音标 · 拼音 · 多服务并行 · 离线 OCR</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+//! Google 翻译免费 Web 端点（translate.googleapis.com，client=gtx）。
+//!
+//! 无需密钥，广泛用于开源项目（DeepLX、openai-translator 等同类思路）。
+//! 响应为嵌套数组：data[0] = [[trans, orig, ...], ...]，data[2] = 检测语言。
+
+use super::{ServiceError, TranslateService};
+
+const API: &str = "https://translate.googleapis.com/translate_a/single";
+
+pub struct GoogleFree;
+
+impl TranslateService for GoogleFree {
+    fn name(&self) -> &'static str {
+        "GoogleFree"
+    }
+
+    fn translate(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<String>, ServiceError> {
+        use crate::lang::{auto_target, detect_source, map_lang};
+        // Bob 代码 -> Google 代码
+        let table: &[(&str, &str)] = &[
+            ("zh-Hans", "zh-CN"),
+            ("zh-Hant", "zh-TW"),
+            ("en", "en"),
+            ("ja", "ja"),
+            ("ko", "ko"),
+            ("fr", "fr"),
+            ("de", "de"),
+            ("ru", "ru"),
+            ("es", "es"),
+        ];
+        let sl = map_lang(from, table);
+        // 防御：auto 目标语言必须先解析成具体语言，绝不能透传给服务商
+        let resolved_to = if to == "auto" {
+            auto_target(detect_source(text)).to_string()
+        } else {
+            to.to_string()
+        };
+        let tl = map_lang(&resolved_to, table);
+
+        let resp = ureq::get(API)
+            .timeout(std::time::Duration::from_secs(15))
+            .query("client", "gtx")
+            .query("sl", &sl)
+            .query("tl", &tl)
+            .query("dt", "t")
+            .query("q", text)
+            .call()
+            .map_err(|e| ServiceError::Network(e.to_string()))?;
+        let data: serde_json::Value = resp
+            .into_json()
+            .map_err(|e| ServiceError::Parse(e.to_string()))?;
+
+        let mut paras = Vec::new();
+        if let Some(rows) = data.get(0).and_then(|v| v.as_array()) {
+            for row in rows {
+                if let Some(seg) = row.get(0).and_then(|v| v.as_str()) {
+                    paras.push(seg.to_string());
+                }
+            }
+        }
+        // Google 会把长文本切成多段，同句拼接：段间无空行时直接相连
+        if paras.is_empty() {
+            return Err(ServiceError::Parse("响应中没有翻译数据".into()));
+        }
+        Ok(vec![paras.concat()])
+    }
+
+    fn detect(&self, _text: &str) -> String {
+        // detect 在 translate 中已知；此处用粗检测兜底
+        crate::lang::detect_source(_text).to_string()
+    }
+}

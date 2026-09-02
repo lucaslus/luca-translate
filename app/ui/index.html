@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>lucas-translate</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 标题栏：可拖拽；上下文标签显示唤起方式 -->
+    <header class="titlebar">
+      <div class="spacer"></div>
+      <button class="ghost" id="btn-settings" title="偏好设置"><span class="icon">settings</span></button>
+      <button class="ghost" id="btn-close" title="隐藏窗口 (Esc)"><span class="icon">close</span></button>
+    </header>
+
+    <!-- 语言栏 -->
+    <div class="langbar">
+      <select id="from-lang" title="源语言">
+        <option value="auto">自动检测</option>
+        <option value="zh-Hans">简体中文</option>
+        <option value="zh-Hant">繁體中文</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+        <option value="ko">한국어</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="ru">Русский</option>
+        <option value="es">Español</option>
+      </select>
+      <button class="swap" id="swap" title="交换语言"><span class="icon">swap_horiz</span></button>
+      <select id="to-lang" title="目标语言">
+        <option value="auto" selected>规则匹配</option>
+        <option value="zh-Hans">简体中文</option>
+        <option value="zh-Hant">繁體中文</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+        <option value="ko">한국어</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="ru">Русский</option>
+        <option value="es">Español</option>
+      </select>
+      <span class="info-tip" id="auto-rule-info" style="display:none">
+        <span class="icon">info</span>
+        <span class="tooltip">规则匹配：按检测到的源语言自动选择目标语言。在偏好设置 → 通用 → 规则匹配 中修改，点击前往</span>
+      </span>
+      <div class="spacer"></div>
+      <button class="chip-btn" id="svc-btn" title="翻译服务开关"><span class="icon">tune</span>服务</button>
+      <div class="svc-pop" id="svc-pop" style="display:none"></div>
+    </div>
+
+    <div class="detect-note" id="detect-info"></div>
+
+    <!-- 输入区 -->
+    <textarea id="input" placeholder="输入文本，Enter 翻译，Shift+Enter 换行" autofocus></textarea>
+
+    <!-- 结果区 -->
+    <main id="result">
+      <div class="empty-state">
+        <p style="font-size:24px;color:var(--text-3)">⌥</p>
+        <p style="margin-top:10px">输入或划词开始翻译</p>
+        <div class="keys">
+          <span><b>⌥A</b>输入</span>
+          <span><b>⌥D</b>划词</span>
+          <span><b>⌥S</b>截图</span>
+          <span><b>⌥C</b>静默OCR</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- 底栏 -->
+    <footer class="statusbar">
+      <span class="meta" id="service-tag"></span>
+      <span class="meta error" id="error-tag"></span>
+      <div class="spacer"></div>
+      <button class="ghost" id="btn-history" title="历史记录"><span class="icon">schedule</span></button>
+      <button class="ghost" id="btn-favorites" title="收藏夹"><span class="icon">star</span></button>
+    </footer>
+
+    <!-- 历史/收藏面板 -->
+    <div id="panel" class="hidden">
+      <div class="panel-head">
+        <div class="panel-tabs">
+          <button class="tab active" data-tab="history">历史</button>
+          <button class="tab" data-tab="favorites">收藏</button>
+        </div>
+        <div class="panel-actions">
+          <button class="ghost" id="panel-clear" title="清空历史"><span class="icon">delete</span></button>
+          <button class="ghost" id="panel-close" title="关闭 (Esc)"><span class="icon">close</span></button>
+        </div>
+      </div>
+      <div id="panel-list"></div>
+    </div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
