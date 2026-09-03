@@ -321,7 +321,10 @@ fn main() {
             // Bob 式行为：release 版失焦自动隐藏
             if let WindowEvent::Focused(false) = event {
                 if window.label() == "main" && !cfg!(debug_assertions) {
-                    let _ = window.hide();
+                    let pinned = window.is_always_on_top().unwrap_or(false);
+                    if !pinned {
+                        let _ = window.hide();
+                    }
                 }
             }
         })

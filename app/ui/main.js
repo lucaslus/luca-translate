@@ -417,6 +417,43 @@ function showOcr(text) {
 
 // ---------- 标题栏按钮 ----------
 // ---------- 标题栏交互 ----------
+const $pinBtn = $("btn-pin");
+let isPinned = false;
+
+function renderPinState(pinned) {
+  isPinned = pinned;
+  $pinBtn.classList.toggle("active", pinned);
+  $pinBtn.setAttribute("aria-pressed", String(pinned));
+  $pinBtn.setAttribute("aria-label", pinned ? "取消置顶" : "置顶窗口");
+  $pinBtn.title = pinned ? "取消置顶" : "置顶窗口";
+}
+
+async function initPinState() {
+  try {
+    renderPinState(await currentWindow.isAlwaysOnTop());
+  } catch (_) {
+    renderPinState(false);
+  } finally {
+    $pinBtn.disabled = false;
+  }
+}
+
+$pinBtn.addEventListener("click", async () => {
+  const next = !isPinned;
+  $pinBtn.disabled = true;
+  try {
+    await currentWindow.setAlwaysOnTop(next);
+    renderPinState(next);
+    showToast(next ? "窗口已置顶" : "已取消置顶");
+  } catch (e) {
+    showToast(`置顶切换失败：${String(e)}`);
+  } finally {
+    $pinBtn.disabled = false;
+  }
+});
+
+initPinState();
+
 // 手动拖拽：data-tauri-drag-region 与 macOS Overlay 标题栏冲突会卡顿，
 // 改为 mousedown 时显式调用 startDragging()，由系统接管移动窗口
 const titlebar = document.querySelector(".titlebar");
@@ -428,7 +465,6 @@ titlebar.addEventListener("mousedown", (e) => {
 });
 titlebar.addEventListener("selectstart", (e) => e.preventDefault());
 
-$("btn-close").addEventListener("click", () => currentWindow.hide());
 $("btn-settings").addEventListener("click", () => invoke("open_settings").catch((e) => showToast(String(e))));
 
 // ---------- 历史 / 收藏面板 ----------

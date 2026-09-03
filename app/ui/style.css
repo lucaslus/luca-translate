@@ -153,14 +153,42 @@ body.mac .titlebar { padding-left: 76px; }
   border-bottom: 1px solid var(--border);
 }
 .titlebar .spacer { flex: 1; }
+.pin-toggle .pin-icon {
+  width: 17px;
+  height: 17px;
+  transform: rotate(-35deg);
+  transition: transform var(--dur) var(--ease);
+}
+.pin-toggle.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.pin-toggle.active .pin-icon { transform: rotate(0deg); }
+.pin-toggle:disabled { cursor: default; opacity: 0.45; }
 
 /* ---------- 语言栏 ---------- */
 .langbar {
   flex-shrink: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
+  margin: 8px 12px 6px;
+  padding: 4px 8px;
+  background: var(--bg-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--r-card);
+  position: relative;
+}
+.lang-selectors {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 12px 6px;
+}
+.lang-actions {
+  grid-column: 3;
+  justify-self: end;
 }
 .langbar select {
   appearance: none;
@@ -189,7 +217,6 @@ body.mac .titlebar { padding-left: 76px; }
 .langbar .swap .icon { font-size: 16px; }
 .langbar .swap:hover { color: var(--accent); background: var(--accent-soft); }
 .langbar .divider { width: 1px; height: 14px; background: var(--border); }
-.langbar .spacer { flex: 1; }
 .langbar .count-chip {
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -204,13 +231,14 @@ body.mac .titlebar { padding-left: 76px; }
   font-size: 10.5px;
   color: var(--text-3);
   padding: 0 14px 6px;
+  text-align: center;
 }
 
 /* ---------- 输入区 ---------- */
 #input {
-  margin: 0 12px 8px;
-  min-height: 46px;
-  max-height: 120px;
+  margin: 10px 12px 0;
+  min-height: 94px;
+  max-height: 160px;
   resize: none;
   background: var(--bg-sunken);
   border: 1px solid transparent;
@@ -221,17 +249,16 @@ body.mac .titlebar { padding-left: 76px; }
   line-height: 1.6;
   font-family: inherit;
   outline: none;
-  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 #input::placeholder { color: var(--text-3); }
-#input:focus { border-color: var(--accent); background: var(--bg); }
+#input:focus { border-color: transparent; background: var(--bg-sunken); }
 
 /* ---------- 结果区 ---------- */
 #result {
   flex: 1;
   overflow-y: auto;
   margin: 0 12px;
-  padding: 2px 2px 8px;
+  padding: 2px 0 8px;
 }
 
 /* 空状态 */
@@ -319,7 +346,13 @@ body.mac .titlebar { padding-left: 76px; }
 .sk.h28 { height: 28px; border-radius: 8px; }
 
 /* ---------- 词典卡 ---------- */
-.dict-card { padding: 2px 2px 10px; }
+.dict-card {
+  padding: 9px 11px;
+  margin-bottom: 7px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
 
 .dict-top {
   display: flex;
@@ -419,7 +452,7 @@ body.mac .titlebar { padding-left: 76px; }
   border-radius: var(--r-card);
   padding: 9px 11px;
   margin-bottom: 7px;
-  background: var(--bg);
+  background: var(--bg-sunken);
   transition: border-color var(--dur) var(--ease);
 }
 .svc:hover { border-color: var(--border-strong); }
@@ -680,8 +713,7 @@ body.mac .titlebar { padding-left: 76px; }
 .info-tip .tooltip {
   position: absolute;
   top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  right: -12px;
   width: 230px;
   background: var(--bg);
   border: 1px solid var(--border-strong);
@@ -733,14 +765,14 @@ body.mac .titlebar { padding-left: 76px; }
   cursor: pointer;
   transition: all var(--dur) var(--ease);
 }
+.langbar .chip-btn { background: var(--bg-hover); }
 .chip-btn .icon { font-size: 14px; }
 .chip-btn:hover, .chip-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
-.langbar { position: relative; }
 .svc-pop {
   position: absolute;
   top: calc(100% - 2px);
-  right: 12px;
+  right: 0;
   min-width: 240px;
   background: var(--bg);
   border: 1px solid var(--border-strong);
