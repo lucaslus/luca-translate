@@ -15,7 +15,11 @@ pub struct OpenAiCompat {
 }
 
 impl OpenAiCompat {
-    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
@@ -46,18 +50,31 @@ impl TranslateService for OpenAiCompat {
         "AI"
     }
 
-    fn translate(
-        &self,
-        text: &str,
-        from: &str,
-        to: &str,
-    ) -> Result<Vec<String>, ServiceError> {
+    fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
         if to == "auto" {
             return Err(ServiceError::Unsupported("目标语言不能是 auto".into()));
         }
-        if self.api_key.trim().is_empty() && !self.base_url.contains("localhost") && !self.base_url.contains("127.0.0.1") {
+        let endpoint = url::Url::parse(&self.base_url)
+            .map_err(|_| ServiceError::Configuration("AI 地址无效".into()))?;
+        let local = endpoint.host_str().is_some_and(|h| {
+            h == "localhost"
+                || h.trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        });
+        if !(endpoint.scheme() == "https" || endpoint.scheme() == "http" && local)
+            || !endpoint.username().is_empty()
+            || endpoint.password().is_some()
+            || endpoint.query().is_some()
+            || endpoint.fragment().is_some()
+        {
+            return Err(ServiceError::Configuration(
+                "云端 AI 地址须使用 HTTPS，且不能包含凭据或查询参数".into(),
+            ));
+        }
+        if self.api_key.trim().is_empty() && !local {
             // Ollama 等本地端点可以无 Key，云端必须填
-            return Err(ServiceError::Unsupported("未配置 API Key".into()));
+            return Err(ServiceError::Configuration("未配置 API Key".into()));
         }
 
         let system_prompt = format!(
@@ -85,31 +102,36 @@ impl TranslateService for OpenAiCompat {
             req = req.set("Authorization", &format!("Bearer {}", self.api_key.trim()));
         }
 
-        let resp = req
-            .send_json(&body)
-            .map_err(|e| ServiceError::Network(e.to_string()))?;
-        let data: Value = resp
-            .into_json()
-            .map_err(|e| ServiceError::Parse(e.to_string()))?;
+        let resp = req.send_json(&body).map_err(ServiceError::from_http)?;
+        let data: Value = resp.into_json().map_err(ServiceError::from_body)?;
 
         let content = data
             .pointer("/choices/0/message/content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ServiceError::Parse(format!(
-                    "AI 响应格式异常: {}",
-                    serde_json::to_string(&data).unwrap_or_default()
-                ))
-            })?;
+            .ok_or_else(|| ServiceError::Parse("AI 响应未包含文字译文".into()))?;
 
-        let trimmed_content = content.trim().trim_matches(|c| c == '"' || c == '\u{201c}' || c == '\u{201d}');
-        if trimmed_content.is_empty() {
+        if content.trim().is_empty() {
             return Err(ServiceError::Parse("AI 译文为空".into()));
         }
 
-        Ok(trimmed_content
-            .split('\n')
-            .map(|s| s.to_string())
-            .collect())
+        Ok(content.split('\n').map(|s| s.to_string()).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn reject_remote_http_and_fake_localhost_before_request() {
+        for url in [
+            "http://localhost.evil/v1",
+            "https://example.invalid/localhost/v1",
+            "http://example.invalid/127.0.0.1",
+        ] {
+            assert!(matches!(
+                OpenAiCompat::new(url, "", "test").translate("hello", "en", "ja"),
+                Err(ServiceError::Configuration(_))
+            ));
+        }
     }
 }

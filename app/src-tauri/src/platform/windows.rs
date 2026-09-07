@@ -14,14 +14,20 @@ const VK_CONTROL: u16 = 0x11;
 const VK_C: u16 = 0x43;
 
 fn key_input(vk: u16, key_up: bool) -> windows::Win32::UI::Input::KeyboardAndMouse::INPUT {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    };
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(vk),
                 wScan: 0,
-                dwFlags: if key_up { KEYEVENTF_KEYUP } else { Default::default() },
+                dwFlags: if key_up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    Default::default()
+                },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -50,21 +56,45 @@ fn post_copy_keystroke() -> Result<(), String> {
 }
 
 pub fn capture_selection_text() -> Option<String> {
-    let mut cb = arboard::Clipboard::new().ok()?;
-    let original = cb.get_text().ok().unwrap_or_default();
-    let _ = cb.set_text(String::new());
-    post_copy_keystroke().ok()?;
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    let text = cb.get_text().ok().filter(|s| !s.trim().is_empty());
-    if !original.is_empty() {
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(600));
-            if let Ok(mut cb) = arboard::Clipboard::new() {
-                let _ = cb.set_text(original);
+    use windows::Win32::System::{
+        DataExchange::GetClipboardSequenceNumber,
+        Ole::{
+            OleFlushClipboard, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize,
+        },
+    };
+    unsafe {
+        OleInitialize(None).ok()?;
+        struct OleGuard;
+        impl Drop for OleGuard {
+            fn drop(&mut self) {
+                unsafe { OleUninitialize() };
             }
-        });
+        }
+        let _guard = OleGuard;
+        let sequence = GetClipboardSequenceNumber();
+        let original = OleGetClipboard().ok()?;
+        if GetClipboardSequenceNumber() != sequence {
+            return None;
+        }
+        post_copy_keystroke().ok()?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
+        while GetClipboardSequenceNumber() == sequence {
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let copied = GetClipboardSequenceNumber();
+        let text = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok());
+        if GetClipboardSequenceNumber() == copied {
+            if OleSetClipboard(&original).is_ok() {
+                let _ = OleFlushClipboard();
+            }
+        }
+        text.filter(|s| !s.trim().is_empty())
     }
-    text
 }
 
 pub fn accessibility_available() -> bool {
@@ -85,7 +115,10 @@ pub fn capture_screen_region(region: &Region) -> Result<Vec<u8>, String> {
         .iter()
         .find(|s| {
             let (x, y) = (s.display_info.x, s.display_info.y);
-            region.x >= x && region.y >= y
+            region.x >= x
+                && region.y >= y
+                && (region.x as i64) < x as i64 + s.display_info.width as i64
+                && (region.y as i64) < y as i64 + s.display_info.height as i64
         })
         .or_else(|| screens.first())
         .ok_or("无可用显示器")?;
@@ -123,9 +156,7 @@ pub fn ocr_png(png: &[u8]) -> Result<Vec<String>, String> {
     // PNG → InMemoryRandomAccessStream
     let stream = InMemoryRandomAccessStream::new().map_err(|e| e.to_string())?;
     let writer = DataWriter::CreateDataWriter(&stream).map_err(|e| e.to_string())?;
-    writer
-        .WriteBytes(png)
-        .map_err(|e| e.to_string())?;
+    writer.WriteBytes(png).map_err(|e| e.to_string())?;
     writer
         .StoreAsync()
         .map_err(|e| e.to_string())?
@@ -163,10 +194,7 @@ pub fn ocr_png(png: &[u8]) -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())?
         .get()
         .map_err(|e| e.to_string())?;
-    let text = result
-        .Text()
-        .map_err(|e| e.to_string())?
-        .to_string();
+    let text = result.Text().map_err(|e| e.to_string())?.to_string();
 
     Ok(text
         .lines()

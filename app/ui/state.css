@@ -1,0 +1,216 @@
+/* One visual language, with visible guidance and small per-channel indicators. */
+.state-slot {
+  min-width: 0;
+  padding: 12px 0;
+}
+.state-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.state-art {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  color: var(--text-2);
+}
+.state-art .icon {
+  font-size: 23px;
+}
+.state-content {
+  min-width: 0;
+  flex: 1;
+}
+.state-slot .state-title {
+  font: 600 13px/1.6 var(--font-ui);
+  color: var(--text-1);
+  margin: 2px 0 0;
+}
+.state-slot .state-description {
+  font: 12px/1.7 var(--font-ui);
+  color: var(--text-2);
+  margin: 5px 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.state-actions .btn {
+  width: auto;
+  height: auto;
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.state-actions .btn-label {
+  white-space: nowrap;
+}
+.state-standalone {
+  max-width: 320px;
+  margin: 28px auto;
+  padding: 12px 6px;
+}
+.state-standalone[data-state="idle"] {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.state-standalone[data-state="idle"] > .state-art {
+  color: var(--accent);
+}
+.state-standalone[data-state="idle"] .state-content {
+  width: 100%;
+}
+.shortcut-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 18px;
+  text-align: left;
+  margin-top: 22px;
+}
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.shortcut-item kbd {
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font: 11px/1.5 var(--font-ui);
+  color: var(--text-2);
+  background: var(--bg-sunken);
+}
+#panel-list > .state-inline {
+  margin: 22px 4px;
+}
+.svc .state-slot {
+  padding: 3px 0 5px;
+  gap: 8px;
+}
+.svc .state-art {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+}
+.svc .state-art .icon {
+  font-size: 20px;
+}
+.svc .state-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.error-details {
+  margin-top: 12px;
+  color: var(--text-2);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.error-details summary {
+  width: fit-content;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.svc .state-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 8px;
+}
+.svc .state-title {
+  grid-column: 1;
+  grid-row: 1;
+}
+.error-recovery {
+  display: contents;
+}
+.error-recovery > .state-actions {
+  grid-column: 2;
+  grid-row: 1;
+  margin-top: 0;
+}
+.error-recovery > .error-details {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+}
+.svc .state-art {
+  margin-top: 3px;
+}
+.error-recovery > .state-actions .btn {
+  font-size: 11px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+.svc .error-details p {
+  font-size: 11px;
+  margin-top: 8px;
+  color: var(--text-2);
+}
+.state-compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.state-spinner {
+  display: block;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  border-radius: 50%;
+  animation: state-spin 0.75s linear infinite;
+}
+@keyframes state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.state-paused .state-spinner {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .state-spinner {
+    animation: none;
+  }
+}
+.svc .channel-loading {
+  min-height: 24px;
+  margin-left: auto;
+  padding: 0;
+}
+.channel-loading .state-art {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+}
+.svc.pending .svc-head {
+  margin-bottom: 0;
+}
+#work-indicator .state-slot {
+  min-height: 28px;
+}
+.state-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

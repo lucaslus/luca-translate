@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; media-src https://dict.youdao.com; object-src 'none'; base-uri 'none'; frame-src 'none'"
     }
   },
   "bundle": {
@@ -36,6 +36,9 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "Apple Development: Lu Jack (37WCB246J7)"
+    }
   }
 }

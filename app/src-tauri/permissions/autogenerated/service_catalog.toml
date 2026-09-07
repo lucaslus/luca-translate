@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-service-catalog"
+description = "Enables the service_catalog command without any pre-configured scope."
+commands.allow = ["service_catalog"]
+
+[[permission]]
+identifier = "deny-service-catalog"
+description = "Denies the service_catalog command without any pre-configured scope."
+commands.deny = ["service_catalog"]

@@ -1,0 +1,375 @@
+/* ---------- 设置窗口布局：侧边栏 + 内容面板 ---------- */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+.settings {
+  display: flex;
+  height: 100%;
+}
+/* 侧边栏通顶：macOS 下为红绿灯留出顶部空间 */
+.side {
+  padding-top: 0;
+}
+body.mac .side {
+  padding-top: 42px;
+}
+.side .brand {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 侧边栏 */
+.side {
+  width: 158px;
+  flex-shrink: 0;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border);
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  user-select: none;
+}
+.side .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 12px;
+}
+.side .brand .name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.nav-item .icon {
+  font-size: 16px;
+  color: var(--text-3);
+  transition: color var(--dur) var(--ease);
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.nav-item.active .icon {
+  color: var(--accent);
+}
+.side .spacer {
+  flex: 1;
+}
+
+/* 内容面板 */
+.content {
+  min-width: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 26px;
+}
+.view {
+  display: none;
+  max-width: 480px;
+}
+.view.active {
+  display: block;
+  animation: view-in var(--dur) var(--ease);
+}
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.view-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 14px;
+}
+
+/* 分组卡片：macOS 系统设置式内嵌列表 */
+.group {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  min-height: 44px;
+  background: var(--bg);
+}
+.row + .row {
+  border-top: 1px solid var(--border);
+}
+.row .label {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+.row .label .t {
+  font-size: 13px;
+  font-weight: 500;
+}
+.row .label .d {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.row .label .d code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--bg-sunken);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.row .label .d b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* 行内控件 */
+.state-chip {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.state-chip.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.state-chip.bad {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* 规则编辑 */
+.group-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 18px 0 6px;
+}
+.rule-hint {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+}
+.rule-row .arrow {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.mini-select {
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-chip);
+  color: var(--text-1);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+  flex: 1;
+}
+.mini-select:focus {
+  border-color: var(--accent);
+}
+.rule-del {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.rule-del:hover {
+  color: var(--danger);
+  background: var(--bg-hover);
+}
+
+/* 分段控件（主题选择） */
+.segmented {
+  display: flex;
+  background: var(--bg-sunken);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.segmented button {
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all var(--dur) var(--ease);
+}
+.segmented button.active {
+  background: var(--bg);
+  color: var(--text-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.segmented button .icon {
+  font-size: 14px;
+}
+
+/* 表单行（AI 配置） */
+.field {
+  padding: 10px 14px;
+}
+.field + .field {
+  border-top: 1px solid var(--border);
+}
+.field .f-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  margin-bottom: 5px;
+  display: flex;
+  justify-content: space-between;
+}
+.field input {
+  width: 100%;
+  background: var(--bg-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--r-chip);
+  padding: 7px 10px;
+  color: var(--text-1);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: all var(--dur) var(--ease);
+}
+.field input:focus {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.field input::placeholder {
+  color: var(--text-3);
+  font-family: var(--font-ui);
+}
+
+/* 快捷键表 */
+.hk {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.hk td {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-1);
+}
+.hk tr:first-child td {
+  border-top: none;
+}
+.hk td:first-child {
+  width: 130px;
+}
+kbd {
+  font-family: var(--font-mono);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  margin-right: 2px;
+}
+.about-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 12.5px;
+}
+.about-line + .about-line {
+  border-top: 1px solid var(--border);
+}
+.about-line .k {
+  color: var(--text-2);
+}
+.about-line .v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+.row {
+  flex-wrap: wrap;
+}
+.row .state-chip,
+.segmented,
+.segmented button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.row .label .t,
+.row .label .d {
+  overflow-wrap: anywhere;
+}
+.ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#ai-status {
+  flex: 1 1 100%;
+  color: var(--text-2);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.about-line {
+  gap: 12px;
+}
+.rule-row .btn {
+  padding-inline: 8px;
+}

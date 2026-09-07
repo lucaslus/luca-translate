@@ -7,8 +7,13 @@ fn main() {
     match platform::ocr_png(&png) {
         Ok(lines) => {
             println!("识别到 {} 行:", lines.len());
-            for l in lines { println!("  | {l}"); }
+            for l in lines {
+                println!("  | {l}");
+            }
         }
-        Err(e) => { eprintln!("OCR 失败: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("OCR 失败: {e}");
+            std::process::exit(1);
+        }
     }
 }

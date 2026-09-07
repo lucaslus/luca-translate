@@ -6,11 +6,12 @@ edition = "2021"
 [dependencies]
 arboard = "3"
 image = "0.25"
+tempfile = "3"
 serde = { version = "1.0.229", features = ["derive"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
-  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Ole", "Win32_System_Com", "Win32_System_DataExchange",
   "Media_Ocr",
   "Graphics_Imaging",
   "Storage_Streams",

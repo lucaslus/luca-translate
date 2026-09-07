@@ -7,7 +7,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use super::{ServiceError, TranslateService};
+use super::{ServiceError, TranslateService, TranslationOutput};
 
 const API: &str = "https://oneshot-free.www.deepl.com/v1/translate";
 const USER_AGENT: &str = "DeepL/26.42 CFNetwork/3826.600.41 Darwin/25.0.0";
@@ -32,6 +32,52 @@ impl DeepLFree {
             instance_id: uuid_v4_lower(),
             session_id: uuid_v4_lower(),
         }
+    }
+
+    fn request_translation(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<TranslationOutput, ServiceError> {
+        if to == "auto" {
+            return Err(ServiceError::Unsupported(
+                "目标语言不能是 auto（应由路由层解析）".into(),
+            ));
+        }
+        let source_lang = if from == "auto" {
+            None
+        } else {
+            Some(oneshot_lang(from, false))
+        };
+
+        let body = OneshotRequest {
+            text: vec![text],
+            target_lang: oneshot_lang(to, true),
+            source_lang,
+            usage_type: "translate",
+            app_information: AppInformation {
+                os: "iOS",
+                os_version: OS_VERSION,
+                app_version: APP_VERSION,
+                app_build: APP_BUILD,
+                instance_id: &self.instance_id,
+            },
+        };
+
+        let resp = ureq::post(API)
+            .timeout(std::time::Duration::from_secs(20))
+            .set("Content-Type", "application/json")
+            .set("Authorization", "None")
+            .set("User-Agent", USER_AGENT)
+            .set("x-app-os-version", OS_VERSION)
+            .set("x-app-instance-id", &self.instance_id)
+            .set("x-app-session-id", &self.session_id)
+            .send_json(&body)
+            .map_err(ServiceError::from_http)?;
+
+        let data: Value = resp.into_json().map_err(ServiceError::from_body)?;
+        parse_translation(&data)
     }
 }
 
@@ -106,76 +152,40 @@ fn oneshot_lang(code: &str, is_target: bool) -> String {
     }
 }
 
+fn parse_translation(data: &Value) -> Result<TranslationOutput, ServiceError> {
+    let translated = data
+        .pointer("/translations/0/text")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ServiceError::Parse("响应缺少 translations 字段".into()))?;
+    if translated.trim().is_empty() {
+        return Err(ServiceError::Parse("译文为空".into()));
+    }
+    Ok(TranslationOutput {
+        paragraphs: translated.split('\n').map(str::to_string).collect(),
+        detected_from: data
+            .pointer("/translations/0/detected_source_language")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+    })
+}
+
 impl TranslateService for DeepLFree {
     fn name(&self) -> &'static str {
         "DeepLFree"
     }
 
-    fn translate(
+    fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+        self.request_translation(text, from, to)
+            .map(|output| output.paragraphs)
+    }
+
+    fn translate_with_detection(
         &self,
         text: &str,
         from: &str,
         to: &str,
-    ) -> Result<Vec<String>, ServiceError> {
-        if to == "auto" {
-            return Err(ServiceError::Unsupported(
-                "目标语言不能是 auto（应由路由层解析）".into(),
-            ));
-        }
-        let source_lang = if from == "auto" {
-            None
-        } else {
-            Some(oneshot_lang(from, false))
-        };
-
-        let body = OneshotRequest {
-            text: vec![text],
-            target_lang: oneshot_lang(to, true),
-            source_lang,
-            usage_type: "translate",
-            app_information: AppInformation {
-                os: "iOS",
-                os_version: OS_VERSION,
-                app_version: APP_VERSION,
-                app_build: APP_BUILD,
-                instance_id: &self.instance_id,
-            },
-        };
-
-        let resp = ureq::post(API)
-            .timeout(std::time::Duration::from_secs(20))
-            .set("Content-Type", "application/json")
-            .set("Authorization", "None")
-            .set("User-Agent", USER_AGENT)
-            .set("x-app-os-version", OS_VERSION)
-            .set("x-app-instance-id", &self.instance_id)
-            .set("x-app-session-id", &self.session_id)
-            .send_json(&body)
-            .map_err(|e| ServiceError::Network(e.to_string()))?;
-
-        let data: Value = resp
-            .into_json()
-            .map_err(|e| ServiceError::Parse(e.to_string()))?;
-
-        let translated = data
-            .pointer("/translations/0/text")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ServiceError::Parse(format!(
-                    "响应缺少 translations 字段: {}",
-                    serde_json::to_string(&data).unwrap_or_default()
-                ))
-            })?;
-
-        if translated.trim().is_empty() {
-            return Err(ServiceError::Parse("译文为空".into()));
-        }
-
-        // 按换行分段（对齐 Bob 的 toParagraphs 展示习惯）
-        Ok(translated
-            .split('\n')
-            .map(|s| s.to_string())
-            .collect())
+    ) -> Result<TranslationOutput, ServiceError> {
+        self.request_translation(text, from, to)
     }
 }
 
@@ -192,10 +202,24 @@ mod tests {
     }
 
     #[test]
+    fn response_includes_deepl_detected_language() {
+        let data = serde_json::json!({
+            "translations": [{"detected_source_language": "EN", "text": "自主的"}]
+        });
+        let output = parse_translation(&data).unwrap();
+        assert_eq!(output.paragraphs, ["自主的"]);
+        assert_eq!(output.detected_from.as_deref(), Some("EN"));
+    }
+
+    #[test]
     fn network_deepl_free_translate() {
         let svc = DeepLFree::new();
         let result = svc
-            .translate("The quick brown fox jumps over the lazy dog", "auto", "zh-Hans")
+            .translate(
+                "The quick brown fox jumps over the lazy dog",
+                "auto",
+                "zh-Hans",
+            )
             .expect("DeepL 免费端点请求失败");
         let joined = result.join("");
         assert!(!joined.is_empty());

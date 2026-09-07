@@ -33,8 +33,12 @@ fn network_route_word_gives_dict_and_phonetics() {
 
 #[test]
 fn network_route_sentence_translates() {
-    let r = route("The quick brown fox jumps over the lazy dog", "auto", "auto")
-        .expect("route failed");
+    let r = route(
+        "The quick brown fox jumps over the lazy dog",
+        "auto",
+        "auto",
+    )
+    .expect("route failed");
     assert!(r.dict.is_none(), "句子不应走词典路由");
     assert!(!r.paragraphs.is_empty());
     let joined = r.paragraphs.join("");
@@ -53,13 +57,12 @@ fn test_pinyin_offline() {
 #[test]
 fn network_route_all_parallel_multi_service() {
     let svcs = lucas_core::services::default_translate_services();
-    let results = lucas_core::services::route_all(
-        &svcs,
-        "Knowledge is power.",
-        "auto",
-        "zh-Hans",
+    let results = lucas_core::services::route_all(&svcs, "Knowledge is power.", "auto", "zh-Hans");
+    assert!(
+        results.len() >= 2,
+        "至少两个服务应成功，实际 {}",
+        results.len()
     );
-    assert!(results.len() >= 2, "至少两个服务应成功，实际 {}", results.len());
     // 顺序保持：第一个是有道
     assert_eq!(results[0].service, "YoudaoDict");
     for r in &results {
@@ -67,6 +70,12 @@ fn network_route_all_parallel_multi_service() {
         assert!(r.pinyin.is_some(), "{} 中文结果应带拼音", r.service);
         println!("  [{}] {:?}", r.service, r.paragraphs);
     }
+    assert!(
+        results
+            .iter()
+            .any(|r| r.source_confirmed && r.detected_from == "en"),
+        "至少一个支持自动检测的渠道应确认英文源语言"
+    );
 }
 
 #[test]
@@ -85,7 +94,14 @@ fn test_ocr_paragraph_merge() {
 #[test]
 fn network_bing_free_translate() {
     let svc = lucas_core::services::bing_free::BingFree;
-    let r = lucas_core::TranslateService::translate(&svc, "Hello world", "auto", "zh-Hans").expect("bing failed");
-    println!("Bing: {:?}", r);
-    assert!(!r.join("").is_empty());
+    let r = lucas_core::TranslateService::translate_with_detection(
+        &svc,
+        "Hello world",
+        "auto",
+        "zh-Hans",
+    )
+    .expect("bing failed");
+    println!("Bing: {:?}", r.paragraphs);
+    assert!(!r.paragraphs.join("").is_empty());
+    assert_eq!(r.detected_from.as_deref(), Some("en"));
 }

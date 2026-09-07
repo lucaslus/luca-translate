@@ -10,30 +10,45 @@ const tip = document.getElementById("tip");
 let silent = false;
 let start = null;
 let dragging = false;
+let submitted = false;
+let captureId = 0;
 
 // 后端告知工作模式
-window.__TAURI__.event.listen("lucas://overlay-init", (e) => {
-  silent = !!e.payload;
+window.__TAURI__.event.listen("lucas://overlay-init", async (e) => {
+  silent = typeof e.payload === 'object' ? !!e.payload.silent : !!e.payload;
+  captureId = e.payload?.capture_id || 0;
+  start = null;
+  dragging = false;
+  submitted = false;
+  sel.style.display = "none";
+  mask.style.display = "block";
+  tip.style.display = "block";
   tip.textContent = silent
     ? "拖拽框选，识别结果将直接复制到剪贴板（Esc 取消）"
     : "拖拽框选识别区域（Esc 取消）";
-});
+  await getCurrentWindow().show();
+  await getCurrentWindow().setFocus();
+  await emit("lucas://overlay-visible", captureId);
+}).then(() => emit("lucas://overlay-ready"));
 
 async function cancel() {
+  if (submitted) return;
+  submitted = true;
   start = null;
   dragging = false;
   sel.style.display = "none";
   mask.style.display = "block";
   await getCurrentWindow().hide();
+  emit("lucas://overlay-cancelled", captureId).catch(() => {});
 }
 
 window.addEventListener("mousedown", (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || submitted) return;
   dragging = true;
-  start = { x: e.screenX, y: e.screenY };
+  start = { x: e.screenX, y: e.screenY, localX: e.clientX, localY: e.clientY };
   sel.style.display = "block";
-  sel.style.left = e.screenX + "px";
-  sel.style.top = e.screenY + "px";
+  sel.style.left = e.clientX + "px";
+  sel.style.top = e.clientY + "px";
   sel.style.width = "0px";
   sel.style.height = "0px";
   mask.style.display = "none";
@@ -42,10 +57,10 @@ window.addEventListener("mousedown", (e) => {
 
 window.addEventListener("mousemove", (e) => {
   if (!dragging || !start) return;
-  const x = Math.min(start.x, e.screenX);
-  const y = Math.min(start.y, e.screenY);
-  const w = Math.abs(e.screenX - start.x);
-  const h = Math.abs(e.screenY - start.y);
+  const x = Math.min(start.localX, e.clientX);
+  const y = Math.min(start.localY, e.clientY);
+  const w = Math.abs(e.clientX - start.localX);
+  const h = Math.abs(e.clientY - start.localY);
   sel.style.left = x + "px";
   sel.style.top = y + "px";
   sel.style.width = w + "px";
@@ -69,8 +84,12 @@ window.addEventListener("mouseup", (e) => {
     tip.style.display = "block";
     return;
   }
+  submitted = true; // 提交后 Esc/鼠标事件不能取消正在进行的 OCR
   sel.style.display = "none";
-  emit("lucas://region-selected", { x, y, w, h, silent });
+  emit("lucas://region-selected", { x, y, w, h, silent, capture_id: captureId }).catch(async () => {
+    submitted = false;
+    await cancel();
+  });
 });
 
 window.addEventListener("keydown", (e) => {

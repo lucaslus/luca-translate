@@ -6,5 +6,32 @@ fn main() {
             "cargo:rustc-link-search=framework=/System/Library/Frameworks/ApplicationServices.framework/Frameworks"
         );
     }
-    tauri_build::build()
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "translate",
+            "cancel_translation",
+            "cancel_ocr",
+            "service_catalog",
+            "capture_selection",
+            "history_list",
+            "history_clear",
+            "favorite_add",
+            "favorites_list",
+            "favorite_remove",
+            "get_ai_config",
+            "set_ai_config",
+            "permission_status",
+            "open_permission_settings",
+            "open_settings",
+            "restart_app",
+            "start_screenshot",
+            "get_routing",
+            "set_routing",
+            "get_services",
+            "set_service",
+            "diagnostics_status",
+            "open_diagnostics",
+        ]),
+    ))
+    .expect("生成应用权限失败")
 }

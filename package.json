@@ -1,0 +1,14 @@
+{
+  "name": "lucas-translate-ui-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/overlay.test.cjs",
+    "test:ui": "node tests/ui.regression.cjs",
+    "lint": "eslint app/ui/*.js"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "eslint": "^10.9.1",
+    "prettier": "^3.9.6"
+  }
+}

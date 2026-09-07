@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-routing"
+description = "Enables the set_routing command without any pre-configured scope."
+commands.allow = ["set_routing"]
+
+[[permission]]
+identifier = "deny-set-routing"
+description = "Denies the set_routing command without any pre-configured scope."
+commands.deny = ["set_routing"]

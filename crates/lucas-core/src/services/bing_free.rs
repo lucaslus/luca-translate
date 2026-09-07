@@ -6,11 +6,11 @@
 //!    form: fromLang=auto-detect, text, to, token, key
 //! 注意 fromLang 必须是 "auto-detect"（"auto" 会返回 400）。
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use super::{ServiceError, TranslateService};
+use super::{ServiceError, TranslateService, TranslationOutput};
 
 const PAGE_URL: &str = "https://www.bing.com/translator";
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -31,7 +31,9 @@ static SESSION: Mutex<Option<BingSession>> = Mutex::new(None);
 
 /// 从页面 HTML 提取参数的小工具（避免引入 regex）
 fn between<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
-    s.split(start).nth(1).and_then(|rest| rest.split(end).next())
+    s.split(start)
+        .nth(1)
+        .and_then(|rest| rest.split(end).next())
 }
 
 fn fetch_session() -> Result<BingSession, ServiceError> {
@@ -39,7 +41,7 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
         .timeout(Duration::from_secs(15))
         .set("User-Agent", UA)
         .call()
-        .map_err(|e| ServiceError::Network(format!("访问 Bing: {e}")))?;
+        .map_err(ServiceError::from_http)?;
 
     // 收集 cookie（Set-Cookie 的 name=value 部分）
     let cookie = resp
@@ -49,9 +51,7 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
         .collect::<Vec<_>>()
         .join("; ");
 
-    let html = resp
-        .into_string()
-        .map_err(|e| ServiceError::Parse(e.to_string()))?;
+    let html = resp.into_string().map_err(ServiceError::from_body)?;
 
     let ig = between(&html, "IG:\"", "\"")
         .ok_or_else(|| ServiceError::Parse("Bing 页面缺少 IG".into()))?
@@ -63,7 +63,10 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
         .ok_or_else(|| ServiceError::Parse("Bing 页面缺少防滥用参数".into()))?
         .to_string();
     // helper 形如 " = [1788342980510,\"token...\",3600000"
-    let arr = &helper[helper.find('[').ok_or_else(|| ServiceError::Parse("Bing 防滥用参数格式异常".into()))? + 1..];
+    let arr = &helper[helper
+        .find('[')
+        .ok_or_else(|| ServiceError::Parse("Bing 防滥用参数格式异常".into()))?
+        + 1..];
     let key = arr.split(',').next().unwrap_or("").trim().to_string();
     let token = between(arr, ",\"", "\"")
         .ok_or_else(|| ServiceError::Parse("Bing 页面缺少 token".into()))?
@@ -72,7 +75,14 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
     if key.is_empty() || token.is_empty() {
         return Err(ServiceError::Parse("Bing 参数提取失败".into()));
     }
-    Ok(BingSession { ig, iid, key, token, cookie, ts: Instant::now() })
+    Ok(BingSession {
+        ig,
+        iid,
+        key,
+        token,
+        cookie,
+        ts: Instant::now(),
+    })
 }
 
 fn get_session() -> Result<BingSession, ServiceError> {
@@ -120,7 +130,27 @@ fn bing_lang(code: &str) -> Option<String> {
     }
 }
 
-fn do_translate(text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+fn parse_translation(data: &Value) -> Result<TranslationOutput, ServiceError> {
+    let text_out = data
+        .get(0)
+        .and_then(|r| r.get("translations"))
+        .and_then(|t| t.get(0))
+        .and_then(|t| t.get("text"))
+        .and_then(|v| v.as_str());
+    match text_out {
+        Some(t) if !t.trim().is_empty() => Ok(TranslationOutput {
+            paragraphs: t.split('\n').map(str::to_string).collect(),
+            detected_from: data
+                .get(0)
+                .and_then(|r| r.pointer("/detectedLanguage/language"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        }),
+        _ => Err(ServiceError::Parse("Bing 返回异常".into())),
+    }
+}
+
+fn do_translate(text: &str, from: &str, to: &str) -> Result<TranslationOutput, ServiceError> {
     let session = get_session()?;
     let target = bing_lang(to)
         .ok_or_else(|| ServiceError::Unsupported(format!("Bing 不支持目标语言 {to}")))?;
@@ -148,27 +178,15 @@ fn do_translate(text: &str, from: &str, to: &str) -> Result<Vec<String>, Service
             ("key", session.key.as_str()),
             ("tryFetchingGenderDebiasedTranslations", "true"),
         ])
-        .map_err(|e| ServiceError::Network(e.to_string()))?;
-    let data: Value = resp
-        .into_json()
-        .map_err(|e| ServiceError::Parse(e.to_string()))?;
+        .map_err(ServiceError::from_http)?;
+    let data: Value = resp.into_json().map_err(ServiceError::from_body)?;
 
-    let text_out = data
-        .get(0)
-        .and_then(|r| r.get("translations"))
-        .and_then(|t| t.get(0))
-        .and_then(|t| t.get("text"))
-        .and_then(|v| v.as_str());
-
-    match text_out {
-        Some(t) if !t.trim().is_empty() => Ok(t.split('\n').map(|s| s.to_string()).collect()),
-        _ => {
+    match parse_translation(&data) {
+        Ok(output) => Ok(output),
+        Err(error) => {
             // 会话过期等场景：使缓存失效并提示上层重试
             invalidate_session();
-            Err(ServiceError::Parse(format!(
-                "Bing 返回异常: {}",
-                serde_json::to_string(&data).unwrap_or_default()
-            )))
+            Err(error)
         }
     }
 }
@@ -178,19 +196,34 @@ impl TranslateService for BingFree {
         "Bing"
     }
 
-    fn translate(
+    fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+        // Do not retry 429/5xx/network errors immediately. Recovery belongs to
+        // the coordinator, which isolates this provider and observes cooldowns.
+        do_translate(text, from, to).map(|output| output.paragraphs)
+    }
+
+    fn translate_with_detection(
         &self,
         text: &str,
         from: &str,
         to: &str,
-    ) -> Result<Vec<String>, ServiceError> {
-        match do_translate(text, from, to) {
-            Ok(r) => Ok(r),
-            Err(_) => {
-                // 会话可能过期：刷新后重试一次
-                invalidate_session();
-                do_translate(text, from, to)
-            }
-        }
+    ) -> Result<TranslationOutput, ServiceError> {
+        do_translate(text, from, to)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_includes_bing_detected_language() {
+        let data = serde_json::json!([{
+            "detectedLanguage": {"language": "en", "score": 1.0},
+            "translations": [{"text": "自主的", "to": "zh-Hans"}]
+        }]);
+        let output = parse_translation(&data).unwrap();
+        assert_eq!(output.paragraphs, ["自主的"]);
+        assert_eq!(output.detected_from.as_deref(), Some("en"));
     }
 }

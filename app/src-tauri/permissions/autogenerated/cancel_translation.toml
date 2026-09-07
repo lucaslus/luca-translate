@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-translation"
+description = "Enables the cancel_translation command without any pre-configured scope."
+commands.allow = ["cancel_translation"]
+
+[[permission]]
+identifier = "deny-cancel-translation"
+description = "Denies the cancel_translation command without any pre-configured scope."
+commands.deny = ["cancel_translation"]

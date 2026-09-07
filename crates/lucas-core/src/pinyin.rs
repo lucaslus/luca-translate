@@ -33,7 +33,11 @@ pub fn annotate(s: &str) -> Option<String> {
         }
     }
     let t = out.trim();
-    if t.is_empty() { None } else { Some(t.to_string()) }
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
 }
 
 /// 仅提取汉字的拼音（忽略所有非汉字字符），适合做整行拼音标注。

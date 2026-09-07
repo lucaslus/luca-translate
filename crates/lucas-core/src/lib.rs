@@ -16,7 +16,7 @@ pub mod tts;
 
 use serde::{Deserialize, Serialize};
 
-pub use services::{route, route_all, DictCard, ServiceError, TranslateService};
+pub use services::{route, route_all, DictCard, ServiceError, TranslateService, TranslationOutput};
 
 /// 单个音标（kind: "us" | "uk" | "generic"）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,6 +38,9 @@ pub struct QueryResult {
     pub text: String,
     pub detected_from: String,
     pub detected_to: String,
+    /// 源语言是否由词典或上游翻译服务确认；false 表示仅为本地提示/手动选项。
+    #[serde(default)]
+    pub source_confirmed: bool,
     /// 译文分段（对齐 Bob 的 toParagraphs 概念，UI 渲染时段落间自动加空行）
     pub paragraphs: Vec<String>,
     /// 单词词典卡片（音标所在处；句子翻译时为 None）
@@ -49,4 +52,7 @@ pub struct QueryResult {
     /// 失败原因（服务失败时存在，用于优雅展示）
     #[serde(default)]
     pub error: Option<String>,
+    /// Structured, privacy-safe metadata for recovery UI and diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<services::FailureInfo>,
 }

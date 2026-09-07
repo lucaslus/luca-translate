@@ -25,19 +25,13 @@ impl YoudaoDict {
             )
             .set("Referer", "https://dict.youdao.com/")
             .send_form(&[("q", text), ("keyfrom", "webdict"), ("client", "web")])
-            .map_err(|e| ServiceError::Network(e.to_string()))?;
-        resp.into_json::<Value>()
-            .map_err(|e| ServiceError::Parse(e.to_string()))
+            .map_err(ServiceError::from_http)?;
+        resp.into_json::<Value>().map_err(ServiceError::from_body)
     }
 
     fn request(&self, text: &str) -> Result<Value, ServiceError> {
-        // 免费通道偶发限流返回空结果，自动重试一次
-        let data = self.request_once(text)?;
-        if data.get("fanyi").is_none() && data.get("ec").is_none() {
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            return self.request_once(text);
-        }
-        Ok(data)
+        // Empty/invalid responses are surfaced, never retried blindly.
+        self.request_once(text)
     }
 }
 
@@ -50,12 +44,14 @@ impl DictService for YoudaoDict {
         let data = self.request(text)?;
         let ec = data.pointer("/ec/word").cloned().unwrap_or(Value::Null);
         if ec.is_null() {
-            return Err(ServiceError::Parse("ec 词典字段缺失（可能不是英文词）".into()));
+            return Err(ServiceError::Parse(
+                "ec 词典字段缺失（可能不是英文词）".into(),
+            ));
         }
 
         let word = ec
             .get("return-phrase")
-            .and_then(|v| v.get("l") )
+            .and_then(|v| v.get("l"))
             .and_then(|v| v.as_str())
             .or_else(|| ec.get("return-phrase").and_then(|v| v.as_str()))
             .unwrap_or(text)
@@ -84,8 +80,16 @@ impl DictService for YoudaoDict {
         let mut meanings = Vec::new();
         if let Some(trs) = ec.get("trs").and_then(|v| v.as_array()) {
             for tr in trs {
-                let pos = tr.get("pos").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let tran = tr.get("tran").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let pos = tr
+                    .get("pos")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let tran = tr
+                    .get("tran")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if !tran.is_empty() {
                     meanings.push((pos, tran));
                 }
@@ -117,12 +121,14 @@ impl TranslateService for YoudaoDict {
         "YoudaoDict"
     }
 
-    fn translate(
-        &self,
-        text: &str,
-        _from: &str,
-        _to: &str,
-    ) -> Result<Vec<String>, ServiceError> {
+    fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+        // This anonymous endpoint cannot select arbitrary language pairs.
+        let source = crate::lang::source_hint(text, from);
+        if !matches!((source, to), ("en", "zh-Hans") | ("zh-Hans", "en")) {
+            return Err(ServiceError::Unsupported(
+                "有道免费通道仅支持中英互译，请使用其他渠道".into(),
+            ));
+        }
         let data = self.request(text)?;
         // 整句翻译结果在 fanyi.tran（实测：可能是 string，也可能是分段数组）
         match data.pointer("/fanyi/tran") {
@@ -155,6 +161,8 @@ impl TranslateService for YoudaoDict {
                 return Ok(paras);
             }
         }
-        Err(ServiceError::Parse("有道未返回译文（可能被临时限流）".into()))
+        Err(ServiceError::Parse(
+            "有道未返回译文（可能被临时限流）".into(),
+        ))
     }
 }

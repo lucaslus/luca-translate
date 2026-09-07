@@ -10,7 +10,23 @@
 fn is_terminal(c: char) -> bool {
     matches!(
         c,
-        '。' | '．' | '.' | '!' | '！' | '?' | '？' | '…' | '；' | ';' | '：' | ':' | '」' | '』' | '"' | ')' | '）' | '】'
+        '。' | '．'
+            | '.'
+            | '!'
+            | '！'
+            | '?'
+            | '？'
+            | '…'
+            | '；'
+            | ';'
+            | '：'
+            | ':'
+            | '」'
+            | '』'
+            | '"'
+            | ')'
+            | '）'
+            | '】'
     )
 }
 
@@ -54,16 +70,29 @@ fn should_join(cur: &str, next: &str) -> bool {
 
 /// 拼接两段文本，处理中英文边界空格
 fn join_line(cur: &mut String, next: &str) {
-    let last_cjk = cur.chars().last().map(|c| {
-        matches!(c as u32, 0x4E00..=0x9FFF)
-    }).unwrap_or(false);
+    let last_cjk = cur
+        .chars()
+        .last()
+        .map(|c| matches!(c as u32, 0x4E00..=0x9FFF))
+        .unwrap_or(false);
     let next_first = next.chars().next();
-    let next_is_ascii = next_first.map(|c| c.is_ascii_alphanumeric()).unwrap_or(false);
-    let cur_ends_ascii = cur.chars().last().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false);
+    let next_is_ascii = next_first
+        .map(|c| c.is_ascii_alphanumeric())
+        .unwrap_or(false);
+    let cur_ends_ascii = cur
+        .chars()
+        .last()
+        .map(|c| c.is_ascii_alphanumeric())
+        .unwrap_or(false);
 
     if cur_ends_ascii && next_is_ascii {
         cur.push(' ');
-    } else if !last_cjk && next_first.map(|c| !c.is_ascii_punctuation()).unwrap_or(false) && cur_ends_ascii {
+    } else if !last_cjk
+        && next_first
+            .map(|c| !c.is_ascii_punctuation())
+            .unwrap_or(false)
+        && cur_ends_ascii
+    {
         cur.push(' ');
     }
     cur.push_str(next.trim());
@@ -101,7 +130,10 @@ mod tests {
         ];
         let paras = merge_ocr_lines(&lines);
         assert_eq!(paras.len(), 2);
-        assert_eq!(paras[0], "今天天气很好，我们一起去公园里散步，顺便买点早餐。");
+        assert_eq!(
+            paras[0],
+            "今天天气很好，我们一起去公园里散步，顺便买点早餐。"
+        );
     }
 
     #[test]
@@ -123,7 +155,10 @@ mod tests {
         ];
         let paras = merge_ocr_lines(&lines);
         assert_eq!(paras.len(), 1);
-        assert_eq!(paras[0], "The quick brown fox jumps over the lazy dog near the river bank");
+        assert_eq!(
+            paras[0],
+            "The quick brown fox jumps over the lazy dog near the river bank"
+        );
     }
 
     #[test]

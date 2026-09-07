@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "main-actions"
+description = "Translation UI cannot read or replace AI credentials."
+commands.allow = ["translate", "cancel_translation", "cancel_ocr", "service_catalog", "capture_selection", "history_list", "history_clear", "favorite_add", "favorites_list", "favorite_remove", "open_permission_settings", "open_settings", "restart_app", "start_screenshot", "get_services", "set_service"]
+
+[[permission]]
+identifier = "diagnostics-actions"
+description = "Open fixed diagnostics directory and read writer health, never arbitrary files."
+commands.allow = ["diagnostics_status", "open_diagnostics"]
+
+[[permission]]
+identifier = "settings-actions"
+description = "Settings UI cannot read history or invoke capture."
+commands.allow = ["service_catalog", "get_services", "set_service", "get_routing", "set_routing", "get_ai_config", "set_ai_config", "permission_status", "open_permission_settings"]
