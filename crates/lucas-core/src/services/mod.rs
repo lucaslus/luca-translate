@@ -100,29 +100,19 @@ pub fn dict_route(trimmed: &str, to: &str) -> Result<QueryResult, ServiceError> 
     if !matches!(to, "auto" | "zh-Hans") {
         return Err(ServiceError::Unsupported("词典仅提供中文释义".into()));
     }
-    let dict = default_dict_service().lookup(trimmed)?;
-    let paragraphs = dict
-        .meanings
-        .iter()
-        .map(|(pos, m)| {
-            if pos.is_empty() {
-                m.clone()
-            } else {
-                format!("{pos} {m}")
-            }
-        })
-        .collect::<Vec<_>>();
+    let youdao_dict::DictionaryOutput { dict, paragraphs } =
+        youdao_dict::YoudaoDict.lookup_or_translate(trimmed)?;
     let detected_to = if to == "auto" {
         lang::auto_target("en")
     } else {
         to
     };
     // 拼音降噪：词典卡只标注第一条词义，避免全量拼音刷屏
-    let pinyin = dict
-        .meanings
-        .first()
-        .map(|(_, m)| m.clone())
-        .and_then(|m| crate::pinyin::annotate(&m));
+    let pinyin = if let Some(dict) = &dict {
+        dict.meanings.first().and_then(|(_, m)| pinyin::annotate(m))
+    } else {
+        pinyin::annotate(&paragraphs.join("\n"))
+    };
     Ok(QueryResult {
         text: trimmed.to_string(),
         detected_from: "en".into(),
@@ -131,7 +121,7 @@ pub fn dict_route(trimmed: &str, to: &str) -> Result<QueryResult, ServiceError> 
         // exist in multiple languages; only an auto-detecting provider confirms.
         source_confirmed: false,
         paragraphs,
-        dict: Some(dict),
+        dict,
         pinyin,
         service: "YoudaoDict".into(),
         error: None,
