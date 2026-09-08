@@ -65,7 +65,7 @@ impl DeepLFree {
             },
         };
 
-        let resp = ureq::post(API)
+        let resp = crate::http::post(API)
             .timeout(std::time::Duration::from_secs(20))
             .set("Content-Type", "application/json")
             .set("Authorization", "None")
@@ -73,10 +73,9 @@ impl DeepLFree {
             .set("x-app-os-version", OS_VERSION)
             .set("x-app-instance-id", &self.instance_id)
             .set("x-app-session-id", &self.session_id)
-            .send_json(&body)
-            .map_err(ServiceError::from_http)?;
+            .send_json(&body)?;
 
-        let data: Value = resp.into_json().map_err(ServiceError::from_body)?;
+        let data: Value = resp.into_json()?;
         parse_translation(&data)
     }
 }

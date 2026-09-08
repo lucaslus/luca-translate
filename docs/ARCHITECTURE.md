@@ -1,5 +1,7 @@
 # lucas-translate 架构设计
 
+> 本文包含早期设计。当前桌面实现已支持原生离线 OCR、Bing、OpenAI 兼容/Ollama、DeepL 官方 API、可取消的并行请求与有界缓存。发布与更新流程见 [RELEASE.md](RELEASE.md)，实际服务状态见 [SERVICES.md](SERVICES.md)；下文“规划”不作为当前支持清单。
+
 ## 总体架构
 
 ```

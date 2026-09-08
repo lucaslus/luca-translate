@@ -37,11 +37,10 @@ fn between<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
 }
 
 fn fetch_session() -> Result<BingSession, ServiceError> {
-    let resp = ureq::get(PAGE_URL)
+    let resp = crate::http::get(PAGE_URL)
         .timeout(Duration::from_secs(15))
         .set("User-Agent", UA)
-        .call()
-        .map_err(ServiceError::from_http)?;
+        .call()?;
 
     // 收集 cookie（Set-Cookie 的 name=value 部分）
     let cookie = resp
@@ -51,7 +50,7 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
         .collect::<Vec<_>>()
         .join("; ");
 
-    let html = resp.into_string().map_err(ServiceError::from_body)?;
+    let html = resp.into_string()?;
 
     let ig = between(&html, "IG:\"", "\"")
         .ok_or_else(|| ServiceError::Parse("Bing 页面缺少 IG".into()))?
@@ -165,7 +164,7 @@ fn do_translate(text: &str, from: &str, to: &str) -> Result<TranslationOutput, S
         "https://www.bing.com/ttranslatev3?isVertical=1&&IG={}&IID={}&SFX=1",
         session.ig, session.iid
     );
-    let resp = ureq::post(&url)
+    let resp = crate::http::post(&url)
         .timeout(Duration::from_secs(15))
         .set("User-Agent", UA)
         .set("Referer", PAGE_URL)
@@ -177,9 +176,8 @@ fn do_translate(text: &str, from: &str, to: &str) -> Result<TranslationOutput, S
             ("token", session.token.as_str()),
             ("key", session.key.as_str()),
             ("tryFetchingGenderDebiasedTranslations", "true"),
-        ])
-        .map_err(ServiceError::from_http)?;
-    let data: Value = resp.into_json().map_err(ServiceError::from_body)?;
+        ])?;
+    let data: Value = resp.into_json()?;
 
     match parse_translation(&data) {
         Ok(output) => Ok(output),

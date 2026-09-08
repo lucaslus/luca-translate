@@ -1,5 +1,5 @@
 {
   "identifier": "main",
   "windows": ["main"],
-  "permissions": ["main-actions", "diagnostics-actions", "core:window:allow-set-always-on-top"]
+  "permissions": ["main-actions", "preferences-read", "diagnostics-actions", "core:window:allow-set-always-on-top"]
 }

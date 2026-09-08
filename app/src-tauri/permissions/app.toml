@@ -1,4 +1,14 @@
 [[permission]]
+identifier = "preferences-read"
+description = "Read non-secret appearance and shortcut preferences."
+commands.allow = ["get_preferences"]
+
+[[permission]]
+identifier = "settings-upgrade"
+description = "Configure official API and shortcuts, and explicitly install signed updates."
+commands.allow = ["get_preferences", "set_preferences", "get_official_config", "set_official_config", "test_official_connection", "check_update", "install_update", "cancel_update"]
+
+[[permission]]
 identifier = "main-actions"
 description = "Translation UI cannot read or replace AI credentials."
 commands.allow = ["translate", "cancel_translation", "cancel_ocr", "service_catalog", "capture_selection", "history_list", "history_clear", "favorite_add", "favorites_list", "favorite_remove", "open_permission_settings", "open_settings", "restart_app", "start_screenshot", "get_services", "set_service"]

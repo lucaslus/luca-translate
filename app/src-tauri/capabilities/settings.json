@@ -1,5 +1,5 @@
 {
   "identifier": "settings",
   "windows": ["settings"],
-  "permissions": ["settings-actions", "diagnostics-actions", "autostart:default"]
+  "permissions": ["settings-actions", "settings-upgrade", "diagnostics-actions", "autostart:default"]
 }

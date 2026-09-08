@@ -1,11 +1,13 @@
 //! 翻译/词典服务抽象与内置实现。
 
 pub mod bing_free;
+pub mod deepl_api;
 pub mod deepl_free;
 mod error;
 pub mod google_free;
 pub mod openai_compat;
 pub mod youdao_dict;
+pub(crate) use error::retry_after;
 pub use error::{ErrorCode, FailureInfo, ServiceError};
 
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,10 @@ impl TranslationOutput {
 /// 翻译服务（句子/文本翻译）。Send + Sync 以支持并行多开。
 pub trait TranslateService: Send + Sync {
     fn name(&self) -> &'static str;
+    /// Process-local cache namespace; never expose the value in logs or IPC.
+    fn cache_identity(&self) -> u64 {
+        private_identity(&self.name())
+    }
     /// `from`/`to` 使用 Bob 风格语言代码，支持 "auto"
     fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError>;
     /// 默认兼容现有渠道；能取得服务商检测语言的渠道应覆盖此方法。
@@ -64,6 +70,13 @@ pub trait TranslateService: Send + Sync {
     fn detect(&self, text: &str) -> String {
         lang::detect_source(text).to_string()
     }
+}
+
+pub(crate) fn private_identity(value: &impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// 词典服务（单词/短语查询，返回音标）

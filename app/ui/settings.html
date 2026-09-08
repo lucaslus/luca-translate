@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>lucas-translate 偏好设置</title>
+  <title>Lucas Translate 偏好设置</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="settings.css" />
   <link rel="stylesheet" href="state.css" />
@@ -35,7 +35,7 @@
             </div>
           </div>
           <div class="row">
-            <div class="label"><div class="t">开机自启</div><div class="d">登录 macOS 后自动在后台启动</div></div>
+            <div class="label"><div class="t">开机自启</div><div class="d">登录系统后自动启动</div></div>
             <label class="switch"><input type="checkbox" aria-label="开机自启" id="autostart" /><span class="slider"></span></label>
           </div>
         </div>
@@ -61,12 +61,6 @@
       <section class="view" id="view-services">
         <div class="view-title">翻译服务</div>
         <div class="group" id="svc-list"></div>
-        <div class="group">
-          <div class="row">
-            <div class="label"><div class="t">系统内置翻译</div><div class="d">调用 macOS 系统翻译能力 — 即将支持</div></div>
-            <label class="switch"><input type="checkbox" disabled /><span class="slider" style="opacity:.4"></span></label>
-          </div>
-        </div>
         <div class="rule-hint">仅查询已启用的服务，并行返回结果。截图图片在本地识别；识别后的文字会发送给这些服务。</div>
         <div class="group">
           <div class="row" style="border-top:none">
@@ -124,12 +118,8 @@
         <div class="view-title">快捷键</div>
         <div class="group">
           <table class="hk">
-            <tr><td><kbd>⌥</kbd><kbd>A</kbd></td><td>输入翻译</td></tr>
-            <tr><td><kbd>⌥</kbd><kbd>D</kbd></td><td>划词翻译</td></tr>
-            <tr><td><kbd>⌥</kbd><kbd>S</kbd></td><td>截图翻译（OCR）</td></tr>
-            <tr><td><kbd>⌥</kbd><kbd>C</kbd></td><td>静默截图 OCR</td></tr>
             <tr><td><kbd>↩</kbd></td><td>翻译</td></tr>
-            <tr><td><kbd>⎋</kbd></td><td>清空 / 关闭面板</td></tr>
+            <tr><td><kbd>⎋</kbd></td><td>关闭浮层 → 取消请求 → 隐藏窗口（保留内容）</td></tr>
           </table>
         </div>
       </section>
@@ -138,8 +128,8 @@
       <section class="view" id="view-about">
         <div class="view-title">关于</div>
         <div class="group">
-          <div class="about-line"><span class="k">应用</span><span class="v">lucas-translate</span></div>
-          <div class="about-line"><span class="k">版本</span><span class="v">0.1.0</span></div>
+          <div class="about-line"><span class="k">应用</span><span class="v">Lucas Translate</span></div>
+          <div class="about-line"><span class="k">版本</span><span class="v" id="app-version">—</span></div>
           <div class="about-line"><span class="k">许可证</span><span class="v">MIT</span></div>
           <div class="about-line"><span class="k">能力</span><span class="v">音标 · 拼音 · 多服务并行 · 离线 OCR</span></div>
         </div>
@@ -152,7 +142,9 @@
     </main>
   </div>
   <script src="shared.js"></script>
+  <script src="preferences.js"></script>
   <script src="state.js"></script>
   <script src="settings.js"></script>
+  <script src="settings-extra.js"></script>
 </body>
 </html>

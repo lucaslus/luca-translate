@@ -373,3 +373,7 @@ kbd {
 .rule-row .btn {
   padding-inline: 8px;
 }
+.settings-status { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.5; overflow-wrap: anywhere; }
+#official-enabled { width: auto; margin-right: 6px; }
+#update-progress { width: 100%; accent-color: var(--accent); }
+[hidden] { display: none !important; }

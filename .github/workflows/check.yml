@@ -7,22 +7,51 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-2022, ubuntu-24.04]
+        include:
+          - os: macos-15
+            bundles: app,dmg
+          - os: macos-15-intel
+            bundles: app,dmg
+          - os: windows-2022
+            bundles: nsis
+          - os: ubuntu-22.04
+            bundles: appimage,deb,rpm
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
       - if: runner.os == 'Linux'
         name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libxcb1-dev libxrandr-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libxcb1-dev libxrandr-dev libfuse2 patchelf rpm
       - name: Core regression tests (no provider requests)
         run: cargo test --manifest-path crates/lucas-core/Cargo.toml --locked -- --skip network
-      - name: Full desktop build, including platform and IPC integration
-        run: cargo build --manifest-path app/src-tauri/Cargo.toml --locked
       - name: Desktop regression tests (no real clipboard or TCC changes)
         run: cargo test --manifest-path app/src-tauri/Cargo.toml --locked
+      - name: Release-mode installer build (no signing secrets on PRs)
+        working-directory: app
+        shell: bash
+        env:
+          CI: 'true'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: npx tauri build --bundles '${{ matrix.bundles }}' --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-installers-${{ matrix.os }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            app/src-tauri/target/release/bundle/**/*.dmg
+            app/src-tauri/target/release/bundle/**/*.exe
+            app/src-tauri/target/release/bundle/**/*.AppImage
+            app/src-tauri/target/release/bundle/**/*.deb
+            app/src-tauri/target/release/bundle/**/*.rpm
   ui:
     runs-on: ubuntu-24.04
     steps:

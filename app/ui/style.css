@@ -36,6 +36,7 @@
 
 /* ---------- Design Tokens ---------- */
 :root {
+  --reading-size: 14px;
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-display: "New York", Georgia, "Times New Roman", "Songti SC", "STSong", serif;
@@ -817,7 +818,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .svc-head { cursor: default; }
 .svc-head .copy-btn { opacity: .75; flex-shrink: 0; }
 .svc:focus-within .copy-btn, .svc:hover .copy-btn { opacity: 1; }
-.svc-body p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.svc-body p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--reading-size); }
+#input { font-size: var(--reading-size); }
 .pinyin-details { margin-top: 10px; font-size: 12px; color: var(--text-2); }
 .pinyin-details summary { cursor: pointer; }
 .pinyin-details p { font-size: 12px; }

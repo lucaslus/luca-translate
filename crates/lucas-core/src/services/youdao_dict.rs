@@ -21,7 +21,7 @@ pub(super) struct DictionaryOutput {
 
 impl YoudaoDict {
     fn request_once(&self, text: &str) -> Result<Value, ServiceError> {
-        let resp = ureq::post(API)
+        let resp = crate::http::post(API)
             .timeout(std::time::Duration::from_secs(15))
             // 浏览器 UA：降低被风控返回空结果的概率
             .set(
@@ -30,8 +30,8 @@ impl YoudaoDict {
             )
             .set("Referer", "https://dict.youdao.com/")
             .send_form(&[("q", text), ("keyfrom", "webdict"), ("client", "web")])
-            .map_err(ServiceError::from_http)?;
-        resp.into_json::<Value>().map_err(ServiceError::from_body)
+            ?;
+        resp.into_json::<Value>()
     }
 
     fn request(&self, text: &str) -> Result<Value, ServiceError> {

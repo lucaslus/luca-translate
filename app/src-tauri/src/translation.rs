@@ -65,6 +65,13 @@ pub struct ServiceInfo {
 pub fn catalog() -> Vec<ServiceInfo> {
     vec![
         ServiceInfo {
+            id: "deepl_api",
+            service: "DeepLApi",
+            label: "DeepL API",
+            description: "官方 API · 需在设置中填写密钥",
+            logo: "logos/deepl.png",
+        },
+        ServiceInfo {
             id: "youdao",
             service: "YoudaoDict",
             label: "有道",
@@ -187,7 +194,10 @@ async fn run(
     if token.is_cancelled() {
         return Ok(());
     }
-    let mut services = crate::build_services(&ai, &toggles);
+    let mut services =
+        tauri::async_runtime::spawn_blocking(move || crate::build_services(&ai, &toggles))
+            .await
+            .map_err(|_| "加载服务失败")?;
     if let Some(name) = &only {
         services.retain(|s| s.name() == name);
     }
@@ -224,6 +234,7 @@ async fn run(
             let provider_permit=tokio::select! { _=token.cancelled()=>return None,p=provider_guard::global().slot(name).acquire_owned()=>p.ok()? };
             let permit = tokio::select! { _ = token.cancelled() => return None, p = jobs().slots.clone().acquire_owned() => p.ok()? };
             if token.is_cancelled() { return None; }
+            let work_token = token.clone();
             let work = tauri::async_runtime::spawn_blocking(move || {
                 let _permit = permit; // Keep the global bound until HTTP really finishes.
                 let _provider_permit=provider_permit;
@@ -232,8 +243,12 @@ async fn run(
                     return skipped(&text,&source,&target,name,&request_id,info);
                 }
                 let started=std::time::Instant::now();
-                let mut result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| query(service,&text,&from,&source,&target)))
+                let key=crate::result_cache::Key { identity:service.cache_identity(),text:text.clone(),from:from.clone(),to:target.clone() };
+                if let Some(cached)=crate::result_cache::global().lock().unwrap_or_else(|e|e.into_inner()).get(&key,started) { return cached; }
+                let mut result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||
+                    lucas_core::http::with_cancellation(work_token.clone(), || query(service,&text,&from,&source,&target))))
                     .unwrap_or_else(|_| failure(&text,&source,&target,name,ServiceError::Internal));
+                if !work_token.is_cancelled() { crate::result_cache::global().lock().unwrap_or_else(|e|e.into_inner()).insert(key,result.clone(),std::time::Instant::now()); }
                 if let Some(info)=result.failure.as_mut(){info.incident_id=Some(uuid::Uuid::new_v4().to_string());}
                 let jitter=u64::from(uuid::Uuid::new_v4().as_bytes()[0]%6);
                 provider_guard::global().observe(name,result.failure.as_mut(),std::time::Instant::now(),jitter);
@@ -438,7 +453,10 @@ mod tests {
             &config::AiConfig::default(),
             &config::ServiceToggles::default(),
         );
-        assert_eq!(services.len(), catalog().len());
+        assert_eq!(
+            services.len(),
+            catalog().iter().filter(|s| s.id != "deepl_api").count()
+        );
         for s in services {
             assert!(catalog().iter().any(|m| m.service == s.name()));
         }
@@ -451,7 +469,7 @@ mod tests {
             ..Default::default()
         };
         let services = crate::build_services(&ai, &config::ServiceToggles::default());
-        assert_eq!(services.len(), catalog().len() + 1);
+        assert_eq!(services.len(), 5); // Four free providers plus independently failing AI.
         let service = services.into_iter().find(|s| s.name() == "AI").unwrap();
         let r = query(service, "test", "en", "en", "ja");
         assert_eq!(r.service, "AI");

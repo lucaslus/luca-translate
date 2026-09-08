@@ -53,16 +53,15 @@ fn request_translation(
     };
     let tl = map_lang(&resolved_to, table);
 
-    let resp = ureq::get(API)
+    let resp = crate::http::get(API)
         .timeout(std::time::Duration::from_secs(15))
         .query("client", "gtx")
         .query("sl", &sl)
         .query("tl", &tl)
         .query("dt", "t")
         .query("q", text)
-        .call()
-        .map_err(ServiceError::from_http)?;
-    let data: serde_json::Value = resp.into_json().map_err(ServiceError::from_body)?;
+        .call()?;
+    let data: serde_json::Value = resp.into_json()?;
     parse_response(&data)
 }
 

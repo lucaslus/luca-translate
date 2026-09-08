@@ -56,3 +56,4 @@ pub struct QueryResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<services::FailureInfo>,
 }
+pub mod http;

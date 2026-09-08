@@ -67,6 +67,7 @@ pub enum ServiceError {
     },
     Timeout,
     Internal,
+    Cancelled,
 }
 impl ServiceError {
     pub fn from_http(error: ureq::Error) -> Self {
@@ -109,7 +110,9 @@ impl ServiceError {
         let code = match self {
             Self::Http { status: 429, .. } => ErrorCode::RateLimited,
             Self::Http { status: 401, .. } => ErrorCode::Unauthorized,
-            Self::Http { status: 403, .. } => ErrorCode::Forbidden,
+            Self::Http {
+                status: 403 | 456, ..
+            } => ErrorCode::Forbidden,
             Self::Http {
                 status: 408 | 504, ..
             }
@@ -123,6 +126,7 @@ impl ServiceError {
             Self::Configuration(_) => ErrorCode::Configuration,
             Self::Unsupported(_) => ErrorCode::Unsupported,
             Self::Internal => ErrorCode::Internal,
+            Self::Cancelled => ErrorCode::Cancelled,
         };
         let mut info = FailureInfo::new(code);
         if let Self::Http {
@@ -142,7 +146,7 @@ impl std::fmt::Display for ServiceError {
     }
 }
 impl Error for ServiceError {}
-fn retry_after(value: &str, now: SystemTime) -> Option<u64> {
+pub(crate) fn retry_after(value: &str, now: SystemTime) -> Option<u64> {
     let value = value.trim();
     if let Ok(seconds) = value.parse::<u64>() {
         return Some(seconds);

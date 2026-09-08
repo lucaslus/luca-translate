@@ -59,6 +59,7 @@ impl Record {
             "YoudaoDict" => Some("YoudaoDict"),
             "Bing" => Some("Bing"),
             "DeepLFree" => Some("DeepLFree"),
+            "DeepLApi" => Some("DeepLApi"),
             "GoogleFree" => Some("GoogleFree"),
             "AI" => Some("AI"),
             _ => None,

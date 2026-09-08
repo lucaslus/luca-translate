@@ -46,6 +46,9 @@ fn lang_desc(code: &str) -> &'static str {
 }
 
 impl TranslateService for OpenAiCompat {
+    fn cache_identity(&self) -> u64 {
+        super::private_identity(&(&self.base_url, &self.api_key, &self.model))
+    }
     fn name(&self) -> &'static str {
         "AI"
     }
@@ -95,15 +98,15 @@ impl TranslateService for OpenAiCompat {
         });
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let mut req = ureq::post(&url)
+        let mut req = crate::http::post(&url)
             .timeout(std::time::Duration::from_secs(60))
             .set("Content-Type", "application/json");
         if !self.api_key.trim().is_empty() {
             req = req.set("Authorization", &format!("Bearer {}", self.api_key.trim()));
         }
 
-        let resp = req.send_json(&body).map_err(ServiceError::from_http)?;
-        let data: Value = resp.into_json().map_err(ServiceError::from_body)?;
+        let resp = req.send_json(&body)?;
+        let data: Value = resp.into_json()?;
 
         let content = data
             .pointer("/choices/0/message/content")

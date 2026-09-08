@@ -1,0 +1,107 @@
+name: Build signed release draft
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: signed-release
+  cancel-in-progress: false
+jobs:
+  ui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+  build:
+    needs: ui
+    # Signing secrets are only used by an explicit run of the trusted main branch.
+    if: github.ref == 'refs/heads/main' && github.repository == 'lucaslus/luca-translate'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: darwin-aarch64
+            bundles: app,dmg
+          - os: macos-15-intel
+            platform: darwin-x86_64
+            bundles: app,dmg
+          - os: windows-2022
+            platform: windows-x86_64
+            bundles: nsis
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            bundles: appimage,deb,rpm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libxcb1-dev libxrandr-dev libfuse2 patchelf rpm
+      - run: npm run lint
+      - run: npm test
+      - run: node scripts/prepare-release.cjs --check-version
+      - run: cargo test --manifest-path crates/lucas-core/Cargo.toml --locked -- --skip network
+      - run: cargo test --manifest-path app/src-tauri/Cargo.toml --locked
+      - name: Build and sign updater archives
+        working-directory: app
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CI: 'true'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo 'Missing updater signing key'; exit 1; }
+          npx tauri build --bundles '${{ matrix.bundles }}' -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            app/src-tauri/target/release/bundle/**/*.dmg
+            app/src-tauri/target/release/bundle/**/*.app.tar.gz
+            app/src-tauri/target/release/bundle/**/*.sig
+            app/src-tauri/target/release/bundle/**/*.exe
+            app/src-tauri/target/release/bundle/**/*.AppImage
+            app/src-tauri/target/release/bundle/**/*.deb
+            app/src-tauri/target/release/bundle/**/*.rpm
+  draft:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: signed-*
+          path: artifacts
+      - run: node scripts/prepare-release.cjs artifacts dist/release
+      - name: Create draft only (review and publish manually)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          gh release create "v$version" dist/release/* --draft --target "$GITHUB_SHA" --title "v$version" --notes 'Unsigned Apple/Windows identity; updater archives are project-signed. Review the assets and run the manual smoke checklist in docs/RELEASE.md before publishing.'

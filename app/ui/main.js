@@ -51,22 +51,21 @@ function resetResult() {
   $("service-tag").textContent = "";
   $("error-tag").textContent = "";
   empty("输入或划词开始翻译", "输入文字，按 Enter 翻译");
-  const modifier = navigator.userAgent.includes("Mac") ? "⌥" : "Alt + ";
   result.querySelector(".state-content").append(
     el(
       "div",
       { class: "shortcut-list", "aria-label": "翻译快捷键" },
       [
-        ["输入翻译", "A"],
-        ["划词翻译", "D"],
-        ["截图翻译", "S"],
-        ["截图取字", "C"],
+        ["输入翻译", "input"],
+        ["划词翻译", "selection"],
+        ["截图翻译", "screenshot"],
+        ["截图取字", "ocr"],
       ].map(([label, key]) =>
         el(
           "div",
           { class: "shortcut-item" },
           el("span", { text: label }),
-          el("kbd", { text: modifier + key }),
+          el("kbd", { text: window.LucasPreferences.shortcut(key), "data-shortcut": key }),
         ),
       ),
     ),
@@ -790,9 +789,7 @@ window.addEventListener("keydown", (e) => {
     cancelWork();
     return;
   }
-  input.value = "";
-  cancelWork(true);
-  input.focus();
+  currentWindow.hide().catch((e) => toast(String(e), true));
 });
 document.querySelector(".titlebar").addEventListener("mousedown", (e) => {
   if (e.button !== 0 || e.target.closest("button")) return;

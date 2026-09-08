@@ -105,6 +105,7 @@ async function main() {
         },
       });
       const win = {
+        hide: async () => { mock.hidden = true; },
         setTheme: async () => {},
         isAlwaysOnTop: async () => false,
         setAlwaysOnTop: async () => {},
@@ -156,6 +157,10 @@ async function main() {
                 model: "mock",
                 has_api_key: true,
               };
+            if (name === "get_preferences") return {preferences: mock.preferences || {font_size:14,shortcuts:{input:"Alt+A",selection:"Alt+D",screenshot:"Alt+S",ocr:"Alt+C"}}, warnings:[]};
+            if (name === "set_preferences") { mock.preferences = args.preferences; return; }
+            if (name === "get_official_config") return {enabled:false,pro:false,has_api_key:true};
+            if (name === "check_update") return {current:"0.1.0", version:"0.2.0", installable:true};
             if (name === "permission_status")
               return { accessibility: true, screen_capture: true };
             if (name === "diagnostics_status")
@@ -621,13 +626,14 @@ async function main() {
     assert(
       await page.locator(".svc.pending .state-spinner").evaluateAll((nodes) =>
         nodes.every((node) => {
-          const box = node.getBoundingClientRect();
           const style = getComputedStyle(node);
+          // A rotating square's transformed bounding box expands at 45°;
+          // layout dimensions test the spinner size without animation-phase flakiness.
           return (
-            box.width >= 13 &&
-            box.width <= 18 &&
-            box.height >= 13 &&
-            box.height <= 18 &&
+            node.offsetWidth >= 13 &&
+            node.offsetWidth <= 18 &&
+            node.offsetHeight >= 13 &&
+            node.offsetHeight <= 18 &&
             style.borderTopColor !== style.borderBottomColor
           );
         }),
@@ -1043,6 +1049,73 @@ async function main() {
     check(
       "settings load failures expose enabled recovery buttons and recover in place",
     );
+    await page.locator("#official-key").fill("synthetic-official-key");
+    await page.evaluate(() => __mock.reject.push("set_official_config"));
+    await page.locator("#official-save").click();
+    await page.waitForFunction(() => !document.querySelector("#official-save").disabled);
+    assert.equal(await page.locator("#official-key").inputValue(), "synthetic-official-key");
+    await page.locator("#official-test").click();
+    assert.equal(await page.evaluate(() => __mock.calls.filter(c => c.name === "test_official_connection").length), 0);
+    await page.evaluate(() => { __mock.reject = []; });
+    await page.locator("#official-save").click();
+    await page.waitForFunction(() => !document.querySelector("#official-save").disabled);
+    assert.equal(await page.locator("#official-key").inputValue(), "");
+    await page.locator("#official-test").click();
+    await page.waitForFunction(() => document.querySelector("#official-status").textContent.includes("连接正常"));
+    check("official credentials preserve failed edits, never return saved keys, and test only saved configuration");
+    await page.locator('[data-view="hotkeys"]').click();
+    await page.locator("#hotkey-input").fill("Ctrl+Shift+A");
+    await page.evaluate(() => __mock.reject.push("set_preferences"));
+    await page.locator("#hotkey-save").click();
+    await page.waitForFunction(() => !document.querySelector("#hotkey-save").disabled);
+    assert.equal(await page.locator("#hotkey-input").inputValue(), "Ctrl+Shift+A");
+    await page.evaluate(() => { __mock.reject = []; });
+    await page.locator("#hotkey-save").click();
+    await page.waitForFunction(() => document.querySelector("#hotkey-status").textContent.includes("已保存"));
+    assert.equal(await page.evaluate(() => __mock.preferences.shortcuts.input), "Ctrl+Shift+A");
+    await page.screenshot({path:join(output,"custom-hotkeys.png")});
+    await page.locator('[data-view="general"]').click();
+    await page.locator("#reading-size").selectOption("20");
+    await page.getByRole("button", {name:"保存字号",exact:true}).click();
+    await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--reading-size") === "20px");
+    assert.equal(await page.evaluate(() => __mock.preferences.shortcuts.input), "Ctrl+Shift+A");
+    check("shortcut save failure preserves draft; font save preserves custom shortcuts");
+    await page.locator('[data-view="about"]').click();
+    await page.evaluate(() => __mock.reject.push("check_update"));
+    await page.locator("#update-check").click();
+    await page.waitForFunction(() => !document.querySelector("#update-check").disabled);
+    assert(await page.locator("#update-install").isHidden());
+    await page.evaluate(() => { __mock.reject = []; __mock.defer.push("install_update"); });
+    await page.locator("#update-check").click();
+    await page.waitForSelector("#update-install", {state:"visible"});
+    await page.locator("#update-install").click();
+    assert((await page.locator("#update-status").textContent()).includes("请先保存"));
+    await page.locator('[data-view="services"]').click();
+    await page.locator("#ai-save").click();
+    await page.waitForFunction(() => !window.LucasAiUnsaved());
+    await page.locator('[data-view="about"]').click();
+    await page.locator("#update-install").click();
+    await page.getByRole("button", {name:"取消",exact:true}).click();
+    assert.equal(await page.evaluate(() => __mock.calls.filter(c=>c.name === "install_update").length),0);
+    await page.locator("#update-install").click();
+    await page.getByRole("button", {name:"安装并重启",exact:true}).click();
+    await page.waitForFunction(() => __mock.pending.install_update?.length);
+    await page.evaluate(() => __mock.emit("update-progress", {phase:"downloading",downloaded:20,total:100}));
+    assert.equal(await page.locator("#update-progress").getAttribute("value"),"20");
+    await assertLayout("signed updater progress and controls");
+    await page.screenshot({path:join(output,"signed-updater.png")});
+    await page.getByRole("button", {name:"取消下载",exact:true}).click();
+    assert.equal(await page.evaluate(() => __mock.calls.filter(c=>c.name === "cancel_update").length),1);
+    await page.evaluate(() => __mock.resolve("install_update"));
+    await page.waitForFunction(() => !document.querySelector("#update-check").disabled);
+    check("update check failures recover; install requires confirmation; download progress and cancel remain visible");
+    await page.goto(base + "/index.html");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#input").fill("preserve on Escape");
+    await page.locator("#input").press("Escape");
+    assert.equal(await page.locator("#input").inputValue(),"preserve on Escape");
+    assert.equal(await page.evaluate(() => __mock.hidden),true);
+    check("idle Escape hides the panel without destroying input");
     assert.deepEqual(errors, []);
     check("no uncaught JavaScript errors");
     console.log(

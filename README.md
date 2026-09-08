@@ -1,137 +1,85 @@
-# lucas-translate
+<h1><img src="app/src-tauri/icons/128x128.png" alt="Lucas Translate app icon" width="40" height="40" align="absmiddle" /> Lucas Translate</h1>
 
-> 一款开源、跨平台（macOS / Windows / Linux）的翻译 & OCR 工具，目标是做 Bob 的平替，并在其基础上做得更好。
+**划词即译，截图取字。 / Select to translate. Capture to extract text.**
 
-## 为什么做这个
+[![Build & tests](https://github.com/lucaslus/luca-translate/actions/workflows/check.yml/badge.svg)](https://github.com/lucaslus/luca-translate/actions/workflows/check.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[Bob](https://bobtranslate.com/) 是 macOS 上优秀的翻译/OCR 软件，但它有两个问题：
+[中文](#中文) · [English](#english) · [快速开始 / Quick start](#quick-start) · [文档 / Docs](#docs)
 
-1. **只有 macOS 版**，Windows / Linux 用户没有选择；
-2. **音标支持很差**：Bob 的音标只存在于金山词霸等词典通道，走普通翻译服务（火山/腾讯/DeepL/OpenAI 等）时完全没有音标，查单词体验割裂。
+## 中文
 
-lucas-translate 的核心设计差异：**词典层与翻译层分离** ——
-- 启用有道且查询英文单词/短语的中文释义时，展示 **英式/美式音标 + 词性词义 + 英/美发音**（以渠道返回为准）；关闭的渠道不会被偷偷调用；
-- 原文或译文包含中文时，自动生成 **拼音标注**（带声调）；
-- 句子翻译走多家翻译服务并行/多开，与 Bob 对齐。
+面向 macOS、Windows 和 Linux 的**开源 Bob Translate 平替**。划词翻译、截图 OCR、AI 翻译和查词，一个桌面工具完成。基于 Rust + Tauri 2 构建。
 
-## 功能规划
+- **翻译对照**：划词、输入、截图翻译，多渠道并行，失败可单独重试。
+- **截图取字**：本地离线 OCR，静默模式直接复制文字，不弹翻译窗口。
+- **自由选服务**：有道、DeepL、Bing、Google，支持 DeepL 官方 API、OpenAI 兼容服务和本地 Ollama。
+- **查词与记录**：音标及发音、中文拼音、历史与收藏；自定义快捷键、字号、窗口大小与主题。
 
-| 功能 | Bob | lucas-translate |
-|---|---|---|
-| 划词 / 输入 / 截图翻译 | ✅ | ✅ 计划 |
-| 静默划词 / 输入框替换 | ✅ | ✅ 计划 |
-| 截图 OCR / 静默 OCR / 连续识别 | ✅ | ✅ 计划 |
-| 多翻译服务同时展示 | ✅ 最多 12 个 | ✅ 已实现 |
-| **英文单词音标（英/美）** | ⚠️ 仅词典服务 | ✅ 内置词典渠道，可独立关闭 |
-| **中文拼音标注（带声调）** | ❌ | ✅ **内置** |
-| TTS 发音 | ✅ | ✅ 词典直发 |
-| 多平台 | ❌ 仅 macOS | ✅ Win / Linux / macOS |
-| 插件系统 | ✅ JavaScriptCore | ✅ 计划（内嵌 JS 运行时） |
-| 开源 | ❌ | ✅ MIT |
+**隐私**：图片不上传，翻译文字仅发送给已启用的服务；静默 OCR 不调用翻译。API Key 存于系统凭据存储。免费网页通道的可用性受网络和服务商限流影响。
 
-## 快速开始
+## English
 
-渠道限流、错误恢复、本地日志入口及 UI 回归说明见 [错误处理与诊断](docs/ERROR-RECOVERY.md)。
+An **open-source Bob Translate alternative** for macOS, Windows, and Linux. Text translation, screenshot OCR, AI translation, and dictionary lookups in one desktop app, built with Rust and Tauri 2.
 
-```bash
-# 核心库单元/集成测试（纯 Rust，无 UI 依赖）
-cargo test --manifest-path crates/lucas-core/Cargo.toml -- --skip network
+- **Compare translations**: translate selected text, input, or screenshots with parallel results and per-service retries.
+- **Extract text locally**: offline OCR with a silent copy-to-clipboard mode—no translation window.
+- **Choose your services**: Youdao, DeepL, Bing, Google, the official DeepL API, and OpenAI-compatible endpoints, including local Ollama.
+- **Look up and save**: phonetics, pronunciation, Chinese pinyin, history, and favorites. Customize shortcuts, text size, window size, and theme.
 
-# 运行桌面应用（需要安装 tauri-cli）
-cargo install tauri-cli --version "^2"
-cd app && cargo tauri dev
-```
+**Privacy**: images stay local; only text is sent to enabled translation services. Silent OCR makes no translation requests. API keys stay in the system credential store. Free web endpoints are subject to network availability and rate limits.
 
-## 项目结构
+## 开发状态 / Status
 
-```
-lucas-translate/
-├── crates/lucas-core/     # 纯 Rust 核心库：服务抽象、词典/翻译/拼音、语言检测
-│   └── src/
-│       ├── services/      #   翻译与词典服务实现（有道词典、Google 免费等）
-│       ├── pinyin.rs      #   拼音生成（带声调）
-│       ├── lang.rs        #   语言代码与检测
-│       └── tts.rs         #   发音 URL 构造
-├── app/                   # Tauri 2 桌面应用（Rust 后端 + Web 前端）
-│   ├── src-tauri/         #   全局快捷键、窗口、命令桥接
-│   └── ui/                #   翻译窗口 UI（原生 HTML/CSS/JS，零构建）
-└── docs/
-    ├── ARCHITECTURE.md    # 三平台技术方案（OCR/划词/截图/插件系统）
-    └── SERVICES.md        # 翻译服务调研（Bob 用了什么、我们用什么）
-```
+持续开发中，安装包以 [Releases](https://github.com/lucaslus/luca-translate/releases) 为准；尚未发布时可从源码运行。CI 配置覆盖 macOS Apple Silicon / Intel、Windows x64、Linux x64 的测试与安装包构建；Windows/Linux 真机体验仍待完整验证。Linux 当前以 X11 为主，Wayland 尚不完整支持。
 
-## Roadmap
+Under active development. See [Releases](https://github.com/lucaslus/luca-translate/releases) for published installers, or build from source. CI is configured for macOS Apple Silicon / Intel, Windows x64, and Linux x64 tests and installer builds. Windows/Linux desktop validation is still pending; Linux targets X11, with incomplete Wayland support.
 
-- [x] 核心库：词典（音标）+ 翻译 + 拼音
-- [x] Tauri 应用骨架 + 翻译窗口 UI
-- [x] 划词翻译（macOS：AX 取词优先 + Cmd+C 模拟兑底，剪贴板自动恢复）
-- [x] 截图 OCR（macOS：选区覆盖层 + screencapture + Apple Vision 离线识别 + 智能分段）
-- [x] 静默截图 OCR（识别结果直接进剪贴板）
-- [x] DeepL 免 Key 通道（oneshot-free 端点，实测可用）
-- [x] 多服务并行多开（tokio/scoped threads 并发，多卡片展示）
-- [x] 历史记录 & 收藏夹（SQLite/WAL，主窗口面板，一键重译/收藏）
-- [x] AI 翻译服务（OpenAI 兼容：DeepSeek/Kimi/智谱/Ollama 本地，设置面板配置）
-- [x] 系统托盘 + 偏好设置（权限检测、一键跳系统设置、开机自启、关闭进后台）
-- [x] Bob 式窗口行为（失焦自动隐藏、⌥D/⌥A/⌥S/⌥C 快捷键）
-- [x] Windows / Linux 划词/截图/OCR 实现（SendInput+WinRT OCR；X11 PRIMARY+xclip+tesseract，平台模块已过交叉编译检查，真机待验证）
-- [x] 多服务开关、单渠道重试、取消等待、错误隔离
-- [ ] 服务拖拽排序
-- [ ] 流式输出（LLM SSE）
-- [ ] 插件系统（内嵌 JS 运行时，兼容 Bob 插件格式是远期目标）
-- [ ] Linux (AppImage/deb) / Windows (msi) / macOS (dmg) 打包发布
+### 安装与更新 / Install & update
 
-## macOS 权限说明
+macOS 版本未使用 Apple Developer ID 签名或公证，也不上架 App Store。**确认来自本仓库 Releases** 后，如系统阻止打开，请先尝试启动，再到「系统设置 → 隐私与安全性 → 仍要打开」。这是安装信任确认，与辅助功能/屏幕录制权限不同。无需关闭系统安全保护。[Apple 说明](https://support.apple.com/en-us/102445)
 
-首次使用需要授权：
-- **辅助功能**（划词翻译）：系统设置 → 隐私与安全性 → 辅助功能
-- **屏幕录制**（截图 OCR）：系统设置 → 隐私与安全性 → 屏幕录制
+The macOS app is not Developer ID–signed or notarized and is not distributed through the App Store. **Only for a release you trust from this repository**, try launching it, then choose **System Settings → Privacy & Security → Open Anyway** if blocked. This is separate from Accessibility/Screen Recording permissions; do not disable system-wide security. [Apple guidance](https://support.apple.com/en-us/102445)
 
-调试工具：
+在「设置 → 关于」检查更新，确认后下载、验证签名并安装。使用 [Tauri Updater](https://v2.tauri.app/plugin/updater/)，无需 Apple 开发者账号；项目更新签名不等于 Apple 公证。Linux 自动更新适用于 AppImage，DEB/RPM 请手动更新。未发布更新源时会提示暂不可用。
+
+Check for updates in **Settings → About**, then confirm to download, verify, and install. [Tauri Updater](https://v2.tauri.app/plugin/updater/) verifies project signatures independently of Apple notarization. Linux in-app updates support AppImage; update DEB/RPM manually. Until a release feed is published, update checks may be unavailable.
+
+<a id="quick-start"></a>
+
+## 快速开始 / Quick start
+
+安装 Rust 和 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)，然后从源码运行。
+
+Install Rust and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/), then run from source.
 
 ```bash
-cd app/src-tauri
-cargo run --example ocr_test /path/to/image.png   # 单独测试 Vision OCR
+git clone https://github.com/lucaslus/luca-translate.git
+cd luca-translate
+cargo install tauri-cli --version "^2" --locked
+cd app
+cargo tauri dev
 ```
 
-授权后若 macOS 提示重启，请彻底退出再从 `/Applications/lucas-translate.app` 打开。
-本地更新应保持 Bundle ID 和代码签名身份一致；不要每次更新都重置 TCC。
-系统开关已开启但应用报告无权限时，应先检查运行的应用路径、签名和权限调用，
-只有确认签名身份变更造成授权失效后，才考虑移除本应用的旧授权条目并重新授权。
+macOS 首次使用需授予辅助功能与屏幕录制权限；仅在系统提示时重启。Linux 划词和 OCR 还需安装 `xclip`、Tesseract 及 `eng` / `chi_sim` 语言包。
 
-macOS 权限检查依赖 `core-graphics >= 0.25`：0.24 错把 C `bool` 声明为
-`boolean_t`，会在 Intel Mac 上误判已授权状态，见
-[上游修复 #698](https://github.com/servo/core-foundation-rs/pull/698)。
-`cargo test --test screen_capture_abi` 用模拟返回值覆盖这一问题，不触发真实授权。
-截图流程向标准错误输出权限状态和截图/OCR 耗时，不记录图片或识别文本。
+On macOS, grant Accessibility and Screen Recording access when requested; restart only if prompted. On Linux, selection capture and OCR also require `xclip`, Tesseract, and the `eng` / `chi_sim` language packs.
 
-已安装应用还支持 `--diagnose-ocr x,y,w,h`：仅对指定矩形连续执行三次本地
-截图/OCR，输出权限、耗时和文字数量，不请求权限或发送翻译请求。
-启动方法和实测记录见 [OCR 权限修复与验证](docs/OCR-PERMISSION-FIX.md)。
-不要直接运行命令行构建来推断已安装应用的 TCC 权限。
+| 快捷键 / Shortcut | 功能 / Action |
+| --- | --- |
+| `Alt/Option + A` | 输入翻译 / Open translation input |
+| `Alt/Option + D` | 划词翻译 / Translate selected text |
+| `Alt/Option + S` | 截图翻译 / Translate a screenshot |
+| `Alt/Option + C` | 静默 OCR，仅复制文字 / Silent OCR, copy text only |
 
-## 数据与交互边界
+以上为默认快捷键，可在设置中修改；冲突时保留原设置。 / These defaults are editable in Settings; conflicts leave your previous bindings intact.
 
-截图图片仅用于本机 OCR，不上传。截图翻译会把识别文字发送给**已启用**的翻译渠道；静默 OCR 只复制文字，不调用翻译。静默结果通过系统通知反馈，不抢焦点；请允许应用通知以看到提醒。
+<a id="docs"></a>
 
-API Key 保存在系统凭据存储（macOS Keychain / Windows Credential Manager / Linux Secret Service），不返回给翻译窗口。首次加载会尝试安全迁移旧 JSON 明文密钥；迁移失败会保留原文件并报错。设置中密钥留空表示保留，移除需明确确认并保存。
+## 文档 / Docs
 
-Linux 划词目前使用 X11 PRIMARY selection，无法读取时不会通过模拟复制破坏剪贴板；Wayland 截图和划词兼容性仍需真机验证。免费网页翻译端点可用性受服务商及网络影响。
-
-## 回归测试
-
-```bash
-npm ci --ignore-scripts
-npm run lint
-npm test
-npx playwright install chromium
-npm run test:ui
-cargo test --manifest-path crates/lucas-core/Cargo.toml -- --skip network
-cargo test --manifest-path app/src-tauri/Cargo.toml
-```
-
-前端回归使用真实 HTML/CSS/JS 和 CSP、模拟 IPC 与合成数据，不会读取真实历史记录、凭据或调用翻译渠道。macOS/Windows/Linux 完整构建已加入 CI；本地平台模块检查不能代替三平台真机测试。
-本轮修复、性能边界与验证记录见 [完整 review 修复说明](docs/REVIEW-FIXES-2026-09-04.md)。
+[架构 / Architecture](docs/ARCHITECTURE.md) · [服务 / Services](docs/SERVICES.md) · [错误与日志 / Troubleshooting](docs/ERROR-RECOVERY.md) · [OCR 权限 / Permissions](docs/OCR-PERMISSION-FIX.md) · [发布 / Releases](docs/RELEASE.md)
 
 ## License
 
-MIT
+[MIT](LICENSE). Independent project; not affiliated with Bob Translate. / 独立项目，与 Bob Translate 无隶属关系。

@@ -84,13 +84,14 @@
         "Bing",
         "GoogleFree",
         "DeepLFree",
+        "DeepLApi",
         "YoudaoDict",
         "AI",
       ].includes(result.service)
         ? result.service
         : "unknown";
     return [
-      "lucas-translate 0.1.0",
+      "Lucas Translate " + (window.LucasVersion || "unknown"),
       `渠道：${service}`,
       `类别：${e.code}`,
       `HTTP：${e.http || "无"}`,

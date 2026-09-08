@@ -11,10 +11,14 @@
 mod config;
 mod db;
 mod diagnostics;
+mod hotkeys;
 mod ocr_diagnostics;
 mod platform;
 mod provider_guard;
+mod result_cache;
+mod settings_commands;
 mod translation;
+mod updates;
 
 use lucas_core::services::{
     bing_free::BingFree, deepl_free::DeepLFree, google_free::GoogleFree,
@@ -43,6 +47,7 @@ static OVERLAY_ACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 /// 权限状态（设置页展示用）
 #[derive(serde::Serialize)]
 struct PermissionStatus {
+    platform: &'static str,
     accessibility: bool,
     screen_capture: bool,
 }
@@ -65,6 +70,12 @@ fn build_services(
     if toggles.google {
         services.push(Box::new(GoogleFree));
     }
+    if toggles.deepl_api {
+        match config::official_service() {
+            Ok(service) => services.push(Box::new(service)),
+            Err(error) => services.push(Box::new(UnavailableOfficial(error))),
+        }
+    }
     if ai.enabled {
         if let Some(error) = ai.error.clone().or_else(|| {
             (ai.base_url.trim().is_empty() || ai.model.trim().is_empty())
@@ -82,6 +93,22 @@ fn build_services(
     services
 }
 struct UnavailableAi(String);
+struct UnavailableOfficial(String);
+impl TranslateService for UnavailableOfficial {
+    fn name(&self) -> &'static str {
+        "DeepLApi"
+    }
+    fn translate(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<String>, lucas_core::services::ServiceError> {
+        Err(lucas_core::services::ServiceError::Configuration(
+            self.0.clone(),
+        ))
+    }
+}
 impl TranslateService for UnavailableAi {
     fn name(&self) -> &'static str {
         "AI"
@@ -161,20 +188,20 @@ fn show_main(app: &AppHandle) {
 
 fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     // global-hotkey 的 Display 输出形如 "alt+KeyD"（alt 前缀 + Code 枚举名）
-    let key = shortcut.to_string().to_lowercase();
+    let key = hotkeys::action(shortcut);
     match key.as_str() {
         // 划词翻译：隐藏窗口 → 捕获选中文本 → 回到窗口并翻译
-        "alt+keyd" | "option+d" | "alt+d" => selection_translate(app),
+        "selection" => selection_translate(app),
         // 输入翻译：唤起主窗口聚焦输入框
-        "alt+keya" | "option+a" | "alt+a" => {
+        "input" => {
             show_main(app);
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.emit("lucas://focus-input", ());
             }
         }
         // 截图翻译 / 静默截图 OCR
-        "alt+keys" | "option+s" | "alt+s" => start_region_capture(app, false),
-        "alt+keyc" | "option+c" | "alt+c" => start_region_capture(app, true),
+        "screenshot" => start_region_capture(app, false),
+        "ocr" => start_region_capture(app, true),
         _ => {
             let _ = app.emit("lucas://shortcut", key);
         }
@@ -324,7 +351,7 @@ fn silent_feedback(app: &AppHandle, message: &str) {
         .body(message)
         .show();
     if let Some(tray) = app.tray_by_id("main-tray") {
-        let _ = tray.set_tooltip(Some(format!("lucas-translate · {message}")));
+        let _ = tray.set_tooltip(Some(format!("Lucas Translate · {message}")));
     }
 }
 fn run_ocr(app: &AppHandle, payload: RegionPayload) {
@@ -467,7 +494,7 @@ fn open_settings_impl(app: &AppHandle) -> Result<(), String> {
     }
     let builder =
         WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-            .title("lucas-translate 偏好设置")
+            .title("Lucas Translate 偏好设置")
             .inner_size(640.0, 470.0)
             .min_inner_size(580.0, 420.0)
             .center()
@@ -493,6 +520,19 @@ fn main() {
         return;
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            show_main(app)
+        }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION,
+                )
+                .with_denylist(&["overlay", "settings"])
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -500,8 +540,6 @@ fn main() {
         ))
         .plugin(
             ShortcutBuilder::new()
-                .with_shortcuts(["option+d", "option+a", "option+s", "option+c"])
-                .expect("注册全局快捷键失败")
                 .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
                         handle_shortcut(app, shortcut);
@@ -510,6 +548,14 @@ fn main() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            settings_commands::get_preferences,
+            settings_commands::set_preferences,
+            settings_commands::get_official_config,
+            settings_commands::set_official_config,
+            settings_commands::test_official_connection,
+            updates::check_update,
+            updates::install_update,
+            updates::cancel_update,
             translate,
             service_catalog,
             cancel_translation,
@@ -555,6 +601,7 @@ fn main() {
         .setup(|app| {
             diagnostics::init(app.path().app_log_dir().ok());
             init_data_paths(app.handle())?;
+            hotkeys::initialize(app.handle());
 
             // ---- 系统托盘 ----
             // 单色 template 图（圆环+两点），macOS 菜单栏深浅色自适应
@@ -569,7 +616,7 @@ fn main() {
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_image)
                 .icon_as_template(true)
-                .tooltip("lucas-translate")
+                .tooltip("Lucas Translate")
                 .menu(&menu)
                 // 托盘点击只打开原生菜单。不要同时绑定鼠标事件唤起窗口，
                 // 否则菜单交互期间的 mouse-up 也会触发 show_main。
@@ -757,6 +804,7 @@ async fn set_ai_config(
 #[tauri::command]
 fn permission_status() -> PermissionStatus {
     PermissionStatus {
+        platform: std::env::consts::OS,
         accessibility: platform::accessibility_available(),
         screen_capture: platform::screen_capture_available(),
     }

@@ -36,6 +36,7 @@ impl Default for RoutingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServiceToggles {
+    pub deepl_api: bool,
     pub youdao: bool,
     pub deepl: bool,
     pub bing: bool,
@@ -44,6 +45,7 @@ pub struct ServiceToggles {
 impl Default for ServiceToggles {
     fn default() -> Self {
         Self {
+            deepl_api: false,
             youdao: true,
             deepl: true,
             bing: true,
@@ -78,6 +80,8 @@ pub struct AiUpdate {
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Document {
+    official: OfficialDocument,
+    preferences: Preferences,
     enabled: bool,
     base_url: String,
     model: String,
@@ -93,6 +97,137 @@ trait Secrets: Send {
     fn get(&self, id: &str) -> Result<String, String>;
     fn set(&self, id: &str, key: &str) -> Result<(), String>;
     fn remove(&self, id: &str);
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct OfficialDocument {
+    pro: bool,
+    secret_id: Option<String>,
+}
+#[derive(Serialize)]
+pub struct OfficialView {
+    pub enabled: bool,
+    pub pro: bool,
+    pub has_api_key: bool,
+}
+#[derive(Deserialize)]
+pub struct OfficialUpdate {
+    pub enabled: bool,
+    pub pro: bool,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear_key: bool,
+}
+impl Store {
+    fn official_save(&mut self, c: OfficialUpdate) -> Result<(), String> {
+        let mut d = self.load()?;
+        let old = d.official.secret_id.clone();
+        let key = c.api_key.as_deref().unwrap_or("").trim();
+        if key.len() > 1024 {
+            return Err("API Key 过长".into());
+        }
+        if c.enabled && key.is_empty() && (c.clear_key || old.is_none()) {
+            return Err("启用前请填写 API Key".into());
+        }
+        let new = (!key.is_empty()).then(|| uuid::Uuid::new_v4().to_string());
+        if let Some(id) = &new {
+            self.vault.set(id, key)?;
+            d.official.secret_id = Some(id.clone());
+        } else if c.clear_key {
+            d.official.secret_id = None;
+        }
+        d.official.pro = c.pro;
+        d.services.deepl_api = c.enabled;
+        if let Err(e) = self.persist(&d) {
+            if let Some(id) = new {
+                self.vault.remove(&id);
+            }
+            return Err(e);
+        }
+        if old != d.official.secret_id {
+            self.official_secret = new.map(|id| (id, key.into()));
+            if let Some(id) = old {
+                self.vault.remove(&id);
+            }
+        }
+        Ok(())
+    }
+    fn official_service(&mut self) -> Result<lucas_core::services::deepl_api::DeepLApi, String> {
+        let d = self.load()?;
+        let id = d.official.secret_id.ok_or("请先保存 DeepL API Key")?;
+        if self.official_secret.as_ref().map(|(i, _)| i) != Some(&id) {
+            self.official_secret = Some((id.clone(), self.vault.get(&id)?));
+        }
+        Ok(lucas_core::services::deepl_api::DeepLApi {
+            api_key: self.official_secret.as_ref().unwrap().1.clone(),
+            pro: d.official.pro,
+        })
+    }
+}
+pub fn official_view() -> Result<OfficialView, String> {
+    with_store(|s| {
+        let d = s.load()?;
+        Ok(OfficialView {
+            enabled: d.services.deepl_api,
+            pro: d.official.pro,
+            has_api_key: d.official.secret_id.is_some(),
+        })
+    })
+}
+pub fn save_official(c: OfficialUpdate) -> Result<(), String> {
+    with_store(|s| s.official_save(c))
+}
+pub fn official_service() -> Result<lucas_core::services::deepl_api::DeepLApi, String> {
+    with_store(Store::official_service)
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Preferences {
+    pub font_size: u8,
+    pub shortcuts: std::collections::BTreeMap<String, String>,
+}
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            font_size: 14,
+            shortcuts: [
+                ("input", "Alt+A"),
+                ("selection", "Alt+D"),
+                ("screenshot", "Alt+S"),
+                ("ocr", "Alt+C"),
+            ]
+            .into_iter()
+            .map(|(a, k)| (a.into(), k.into()))
+            .collect(),
+        }
+    }
+}
+pub fn preferences() -> Result<Preferences, String> {
+    with_store(|s| Ok(s.load()?.preferences))
+}
+pub fn save_preferences(p: Preferences) -> Result<(), String> {
+    if !(11..=20).contains(&p.font_size) {
+        return Err("字号范围为 11–20".into());
+    }
+    with_store(|s| {
+        s.update(|d| {
+            d.preferences = p;
+            Ok(())
+        })
+    })
+}
+pub fn save_font_size(size: u8) -> Result<(), String> {
+    if !(11..=20).contains(&size) {
+        return Err("字号范围为 11–20".into());
+    }
+    with_store(|s| {
+        s.update(|d| {
+            d.preferences.font_size = size;
+            Ok(())
+        })
+    })
 }
 struct SystemSecrets;
 impl Secrets for SystemSecrets {
@@ -113,6 +248,7 @@ impl Secrets for SystemSecrets {
     }
 }
 struct Store {
+    official_secret: Option<(String, String)>,
     path: PathBuf,
     vault: Box<dyn Secrets>,
     cached: Option<Document>,
@@ -272,6 +408,7 @@ fn validate_ai(c: &AiUpdate) -> Result<(), String> {
 static STORE: OnceLock<Mutex<Store>> = OnceLock::new();
 pub fn set_config_dir(dir: PathBuf) {
     let _ = STORE.set(Mutex::new(Store {
+        official_secret: None,
         path: dir.join("config.json"),
         vault: Box::new(SystemSecrets),
         cached: None,
@@ -306,6 +443,12 @@ pub fn set_service(id: &str, enabled: bool) -> Result<ServiceToggles, String> {
                 "deepl" => d.services.deepl = enabled,
                 "bing" => d.services.bing = enabled,
                 "google" => d.services.google = enabled,
+                "deepl_api" => {
+                    if enabled && d.official.secret_id.is_none() {
+                        return Err("请先在设置中保存 DeepL API Key".into());
+                    }
+                    d.services.deepl_api = enabled;
+                }
                 _ => return Err("未知服务".into()),
             };
             Ok(())
@@ -361,6 +504,7 @@ mod tests {
     }
     fn store(path: PathBuf) -> Store {
         Store {
+            official_secret: None,
             path,
             cached: None,
             secret: None,
@@ -400,6 +544,50 @@ mod tests {
             })
             .is_err());
         assert_eq!(std::fs::read_to_string(path).unwrap(), "broken");
+    }
+    #[test]
+    fn official_key_is_transactional_and_never_returned_or_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = store(dir.path().join("config.json"));
+        let update = |key: &str| OfficialUpdate {
+            enabled: true,
+            pro: false,
+            api_key: Some(key.into()),
+            clear_key: false,
+        };
+        assert!(s.official_save(update("")).is_err());
+        s.official_save(update("official-synthetic-secret"))
+            .unwrap();
+        let old = s.load().unwrap();
+        assert!(!std::fs::read_to_string(&s.path)
+            .unwrap()
+            .contains("official-synthetic-secret"));
+        assert_eq!(
+            s.official_service().unwrap().api_key,
+            "official-synthetic-secret"
+        );
+        s.path = dir.path().join("blocked");
+        std::fs::create_dir(&s.path).unwrap();
+        assert!(s.official_save(update("replacement-secret")).is_err());
+        assert_eq!(s.load().unwrap().official.secret_id, old.official.secret_id);
+        assert_eq!(
+            s.official_service().unwrap().api_key,
+            "official-synthetic-secret"
+        );
+        s.path = dir.path().join("config.json");
+        s.official_save(OfficialUpdate {
+            enabled: false,
+            pro: false,
+            api_key: None,
+            clear_key: true,
+        })
+        .unwrap();
+        assert!(s.official_service().is_err());
+        assert!(s
+            .vault
+            .get(old.official.secret_id.as_ref().unwrap())
+            .is_err());
+        assert!(s.load().unwrap().services.bing);
     }
     #[test]
     fn reject_insecure_remote_url() {

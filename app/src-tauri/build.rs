@@ -8,6 +8,14 @@ fn main() {
     }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "get_preferences",
+            "set_preferences",
+            "get_official_config",
+            "set_official_config",
+            "test_official_connection",
+            "check_update",
+            "install_update",
+            "cancel_update",
             "translate",
             "cancel_translation",
             "cancel_ocr",

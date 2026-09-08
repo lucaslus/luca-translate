@@ -27,20 +27,22 @@
 | 服务 | 类型 | 通道 | 说明 |
 |---|---|---|---|
 | 有道词典 | 词典+翻译 | `dict.youdao.com/jsonapi_s`（POST, keyfrom=webdict） | 单词返回英/美音标；整句也能翻 |
-| **DeepL 免费** | 翻译 | `oneshot-free.www.deepl.com/v1/translate`（模拟交互式客户端，参考 DLX 社区公开研究） | 无需密钥；质量顶级；实测可用 ✅ |
+| **DeepL 免费** | 翻译 | `oneshot-free.www.deepl.com/v1/translate` | 免费网页通道，可能限流或变更，不承诺可用性 |
+| **DeepL 官方 API** | 翻译 | `api-free.deepl.com/v2/translate` / `api.deepl.com/v2/translate` | 可选，默认关闭；在设置中配置 Free/Pro 账户和密钥 |
+| Bing | 翻译 | 网页翻译接口 | 免费通道，动态获取会话信息 |
+| OpenAI 兼容 / Ollama | 翻译 | 用户自填 endpoint + model | 已支持；密钥使用系统凭据存储 |
 | Google 免费端点 | 翻译 | `translate.googleapis.com/translate_a/single?client=gtx` | 降级通道；注意反爬（Sorry 页） |
 | 有道发音 | TTS | `dict.youdao.com/dictvoice?type=1/2` | 英式 type=1，美式 type=2，直接可播 |
 
-**句子翻译降级链**：有道 → DeepL 免费 → Google。
+**桌面端并行返回**：只请求已启用的渠道，失败仅影响该卡片，不自动重复发送或切换付费服务。共享 HTTP 连接池，取消会终止网络等待；成功结果按文本、语向、服务和配置隔离，内存缓存有效期 5 分钟，上限 128 条 / 约 2 MiB 载荷，不缓存失败。429 等可重试错误采用按渠道冷却，避免重试风暴。
+
+DeepL 官方连接测试仅调用 [`GET /v2/usage`](https://developers.deepl.com/api-reference/usage-and-quota/check-usage-and-limits)，不发送用户文字。官方 API 的额度与 SLA 由服务商和账户方案决定，并非无限免费或绝对可靠。
 
 ### 第二梯队（规划，免密钥/自建）
 | 服务 | 说明 |
 |---|---|
 | DeepLX | 社区 DeepL 免费方案，可自建 endpoint |
-| Ollama | 本地 LLM 翻译，完全离线，隐私最优 |
-| OpenAI 兼容 API | 用户自填 base_url + key，覆盖 DeepSeek/Kimi/GLM 等 |
 | macOS 系统翻译 | Translation framework，免密钥 |
-| Edge/Bing 免费翻译 | 需动态 token，实现成本中等 |
 
 ### 第三梯队（规划，用户自申密钥）
 火山 / 腾讯 / 百度 / 阿里 / 有道开放平台 等，设计上通过统一 `TranslateService` trait 接入，UI 展示顺序可拖拽排序（对齐 Bob）。
