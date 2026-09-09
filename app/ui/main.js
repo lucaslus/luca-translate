@@ -28,6 +28,7 @@ let stream = null,
   meta = [],
   captureBusy = false,
   booted = false;
+let desktopPanel = false;
 const serviceMeta = (name) =>
   meta.find((m) => m.service === name) || {
     label: name === "AI" ? "AI" : name,
@@ -65,7 +66,10 @@ function resetResult() {
           "div",
           { class: "shortcut-item" },
           el("span", { text: label }),
-          el("kbd", { text: window.LucasPreferences.shortcut(key), "data-shortcut": key }),
+          el("kbd", {
+            text: window.LucasPreferences.shortcut(key),
+            "data-shortcut": key,
+          }),
         ),
       ),
     ),
@@ -776,6 +780,14 @@ panel.addEventListener("keydown", (e) => {
 });
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+  if (desktopPanel) {
+    e.preventDefault();
+    if (captureBusy || (stream && !stream.done)) cancelWork();
+    closePanel();
+    closeServices();
+    currentWindow.hide().catch((err) => toast(String(err), true));
+    return;
+  }
   if (!panel.classList.contains("hidden")) {
     closePanel();
     return;
@@ -947,6 +959,7 @@ async function init() {
     input.disabled = false;
     input.focus();
     resetResult();
+    desktopPanel = await invoke("desktop_ready");
   } catch (e) {
     empty("界面初始化失败", String(e), [
       button("重新加载", () => location.reload()),

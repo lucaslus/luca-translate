@@ -56,6 +56,13 @@ function prepare(input, output) {
     for (const file of assets)
       files.push({ file, name: target + "-" + path.basename(file) });
   }
+  const archName = `lucas-translate-${v}-1-x86_64.pkg.tar.zst`;
+  const archPackages = walk(path.join(input, "arch-x86_64")).filter((p) =>
+    p.endsWith(".pkg.tar.zst"),
+  );
+  if (archPackages.length !== 1 || path.basename(archPackages[0]) !== archName)
+    throw Error("Expected one matching Arch Linux package: " + archName);
+  files.push({ file: archPackages[0], name: archName });
   if (new Set(files.map((f) => f.name)).size !== files.length)
     throw Error("Duplicate release asset names");
   // Exclusive creation prevents accidentally overwriting an already prepared release.

@@ -10,6 +10,7 @@
 
 mod config;
 mod db;
+mod desktop_control;
 mod diagnostics;
 mod hotkeys;
 mod ocr_diagnostics;
@@ -179,6 +180,8 @@ fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        #[cfg(target_os = "linux")]
+        desktop_control::focus_main(app);
     }
 }
 
@@ -213,6 +216,11 @@ fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut) {
 // ---------------------------------------------------------------------------
 
 fn start_region_capture(app: &AppHandle, silent: bool) {
+    #[cfg(target_os = "linux")]
+    if desktop_control::hyprland() {
+        desktop_control::capture(app, silent);
+        return;
+    }
     if OCR_RUNNING.load(std::sync::atomic::Ordering::Acquire) {
         show_main(app);
         let _ = app.emit(
@@ -519,9 +527,10 @@ fn main() {
         }
         return;
     }
+    desktop_control::initialize();
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            show_main(app)
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            desktop_control::receive(app, &args);
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
@@ -548,6 +557,7 @@ fn main() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            desktop_control::desktop_ready,
             settings_commands::get_preferences,
             settings_commands::set_preferences,
             settings_commands::get_official_config,
@@ -588,9 +598,10 @@ fn main() {
                     let _ = window.hide();
                 }
             }
-            // Bob 式行为：release 版失焦自动隐藏
+            // Hyprland activation is asynchronous; blur can arrive while showing selection results.
+            // Keep its panel open until an explicit Esc / toggle / close.
             if let WindowEvent::Focused(false) = event {
-                if window.label() == "main" && !cfg!(debug_assertions) {
+                if window.label() == "main" && desktop_control::hide_on_blur() {
                     let pinned = window.is_always_on_top().unwrap_or(false);
                     if !pinned {
                         let _ = window.hide();

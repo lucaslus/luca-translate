@@ -31,19 +31,55 @@ An **open-source Bob Translate alternative** for macOS, Windows, and Linux. Text
 
 ## 开发状态 / Status
 
-持续开发中，安装包以 [Releases](https://github.com/lucaslus/luca-translate/releases) 为准；尚未发布时可从源码运行。CI 配置覆盖 macOS Apple Silicon / Intel、Windows x64、Linux x64 的测试与安装包构建；Windows/Linux 真机体验仍待完整验证。Linux 当前以 X11 为主，Wayland 尚不完整支持。
+持续开发中，安装包以 [Releases](https://github.com/lucaslus/luca-translate/releases) 为准；尚未发布时可从源码运行。CI 配置覆盖 macOS Apple Silicon / Intel、Windows x64、Linux x64 的测试与安装包构建，包含 Arch 原生包。已在 Omarchy 真机验证安装、浮动窗口、聚焦和 Esc 隐藏；其他平台及完整翻译/OCR 流程仍需持续验证。Linux 支持 X11，并提供 Omarchy / Hyprland 专用集成；其他 Wayland 桌面尚未完整支持。
 
-Under active development. See [Releases](https://github.com/lucaslus/luca-translate/releases) for published installers, or build from source. CI is configured for macOS Apple Silicon / Intel, Windows x64, and Linux x64 tests and installer builds. Windows/Linux desktop validation is still pending; Linux targets X11, with incomplete Wayland support.
+Under active development. See [Releases](https://github.com/lucaslus/luca-translate/releases) for published installers, or build from source. CI covers macOS Apple Silicon / Intel, Windows x64, and Linux x64, including native Arch packages. Installation, floating windows, focus, and Escape dismissal have been verified on Omarchy. Linux supports X11 and dedicated Omarchy / Hyprland integration; other Wayland desktops and complete translation/OCR workflows still need further validation.
 
 ### 安装与更新 / Install & update
+
+**Arch Linux / Omarchy（x86_64）**：下载 Release 中的 `lucas-translate-<版本>-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./lucas-translate-<版本>-1-x86_64.pkg.tar.zst`。安装后在应用菜单打开 **Lucas Translate**，或运行 `lucas-translate`。依赖包含划词工具及中英文 OCR 语言包；API 凭据还需可用且已解锁的 Secret Service（例如 GNOME Keyring）。后续版本使用相同的 `pacman -U` 命令升级；卸载用 `sudo pacman -R lucas-translate`。Omarchy / Hyprland 可启用下方专用集成；其他 Wayland 桌面仍未完整适配。
+
+**Arch Linux / Omarchy (x86_64)**: download the `.pkg.tar.zst` Release asset and install/upgrade with `sudo pacman -U ./lucas-translate-<version>-1-x86_64.pkg.tar.zst`. Launch **Lucas Translate** from the application menu. Native packages include X11 selection and Chinese/English OCR dependencies and use manual package-manager updates. Enable the integration below for Omarchy / Hyprland.
 
 macOS 版本未使用 Apple Developer ID 签名或公证，也不上架 App Store。**确认来自本仓库 Releases** 后，如系统阻止打开，请先尝试启动，再到「系统设置 → 隐私与安全性 → 仍要打开」。这是安装信任确认，与辅助功能/屏幕录制权限不同。无需关闭系统安全保护。[Apple 说明](https://support.apple.com/en-us/102445)
 
 The macOS app is not Developer ID–signed or notarized and is not distributed through the App Store. **Only for a release you trust from this repository**, try launching it, then choose **System Settings → Privacy & Security → Open Anyway** if blocked. This is separate from Accessibility/Screen Recording permissions; do not disable system-wide security. [Apple guidance](https://support.apple.com/en-us/102445)
 
-在「设置 → 关于」检查更新，确认后下载、验证签名并安装。使用 [Tauri Updater](https://v2.tauri.app/plugin/updater/)，无需 Apple 开发者账号；项目更新签名不等于 Apple 公证。Linux 自动更新适用于 AppImage，DEB/RPM 请手动更新。未发布更新源时会提示暂不可用。
+在「设置 → 关于」检查更新，确认后下载、验证签名并安装。使用 [Tauri Updater](https://v2.tauri.app/plugin/updater/)，无需 Apple 开发者账号；项目更新签名不等于 Apple 公证。Linux 自动更新适用于 AppImage，DEB/RPM/Arch 请手动更新。未发布更新源时会提示暂不可用。
 
-Check for updates in **Settings → About**, then confirm to download, verify, and install. [Tauri Updater](https://v2.tauri.app/plugin/updater/) verifies project signatures independently of Apple notarization. Linux in-app updates support AppImage; update DEB/RPM manually. Until a release feed is published, update checks may be unavailable.
+Check for updates in **Settings → About**, then confirm to download, verify, and install. [Tauri Updater](https://v2.tauri.app/plugin/updater/) verifies project signatures independently of Apple notarization. Linux in-app updates support AppImage; update DEB/RPM/Arch manually. Until a release feed is published, update checks may be unavailable.
+
+### Omarchy / Hyprland 浮动面板 / Floating panel
+
+使用 Lua 配置的 Omarchy 安装 Arch 包后，执行：
+
+After installing the Arch package on an Omarchy desktop with Lua configuration, run:
+
+```sh
+sudo pacman -S --needed python wl-clipboard grim slurp
+lucas-translate-setup-omarchy
+```
+
+第二条命令以当前桌面用户运行，**不要加 sudo**。安装器检查快捷键冲突、备份个人配置并验证重载；发现占用时退出，不覆盖系统绑定。仅安装 pacman 包不会自动修改桌面配置。
+
+Run the setup command **without sudo**. It checks shortcut conflicts, backs up your configuration, and validates the reload. Occupied shortcuts are not replaced. Installing the package alone does not change desktop configuration.
+
+| Omarchy 快捷键 / Shortcut | 功能 / Action |
+| --- | --- |
+| `Super+Ctrl+Shift+T` | 唤起并聚焦；已聚焦时隐藏 / Show and focus; hide when focused |
+| `Super+Ctrl+Shift+D` | 划词翻译 / Translate selected text |
+| `Super+Ctrl+Shift+S` | 框选截图翻译 / Translate a screenshot region |
+| `Super+Ctrl+Shift+C` | 静默 OCR，仅复制文字 / OCR to clipboard without opening the panel |
+| `Esc` | 隐藏主面板，保留输入；框选时取消 / Hide and preserve input; cancel region selection |
+
+- 默认 **420×650 居中浮窗**，可拖动和调整尺寸；应用未运行时快捷键会启动它。
+- **失焦不会自动隐藏**，避免 Wayland 聚焦时序导致划词结果闪现消失。按 Esc、聚焦时再次按切换键或点击关闭按钮隐藏；托盘菜单“退出”才会结束进程。
+- 快捷键由 Hyprland 管理；修改应用内的 Alt/Option 快捷键不会改变上述绑定。
+- 划词通过 `wl-paste` 读取 PRIMARY 选区；部分应用不支持它，需要手动复制并粘贴。截图通过 `slurp` / `grim`，OCR 在本地执行。
+
+The panel floats centered at **420×650** and can be moved or resized. It explicitly requests compositor focus and **stays visible when focus changes**. Escape and the close button hide it without quitting; use the tray menu to exit. Hyprland owns these shortcuts. Selection capture requires the source application to expose a PRIMARY selection; otherwise copy and paste manually. Region capture uses `slurp` / `grim` with local OCR.
+
+配置位置、命令接口和卸载集成方法见 [Omarchy 集成说明 / Integration guide](docs/OMARCHY.md)。
 
 <a id="quick-start"></a>
 
@@ -72,13 +108,13 @@ On macOS, grant Accessibility and Screen Recording access when requested; restar
 | `Alt/Option + S` | 截图翻译 / Translate a screenshot |
 | `Alt/Option + C` | 静默 OCR，仅复制文字 / Silent OCR, copy text only |
 
-以上为默认快捷键，可在设置中修改；冲突时保留原设置。 / These defaults are editable in Settings; conflicts leave your previous bindings intact.
+以上为非 Hyprland 会话的默认快捷键，可在设置中修改；冲突时保留原设置。Omarchy 使用上方的 Super 组合，由桌面配置管理。 / These defaults apply outside Hyprland and can be edited in Settings; conflicts preserve existing bindings. Omarchy uses the compositor-managed Super combinations above.
 
 <a id="docs"></a>
 
 ## 文档 / Docs
 
-[架构 / Architecture](docs/ARCHITECTURE.md) · [服务 / Services](docs/SERVICES.md) · [错误与日志 / Troubleshooting](docs/ERROR-RECOVERY.md) · [OCR 权限 / Permissions](docs/OCR-PERMISSION-FIX.md) · [发布 / Releases](docs/RELEASE.md)
+[架构 / Architecture](docs/ARCHITECTURE.md) · [服务 / Services](docs/SERVICES.md) · [错误与日志 / Troubleshooting](docs/ERROR-RECOVERY.md) · [OCR 权限 / Permissions](docs/OCR-PERMISSION-FIX.md) · [发布 / Releases](docs/RELEASE.md) · [Omarchy 集成 / Integration](docs/OMARCHY.md)
 
 ## License
 

@@ -72,7 +72,9 @@ pub async fn install_update(
         return Err("开发版本不覆盖安装，请使用发布安装包".into());
     }
     if cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_none() {
-        return Err("Linux 自动更新仅用于 AppImage；DEB / RPM 请手动更新".into());
+        return Err(
+            "Linux 自动更新仅用于 AppImage；DEB / RPM / Arch 请通过系统包管理器手动更新".into(),
+        );
     }
     let mut state = pending().try_lock().map_err(|_| "更新操作正在进行")?;
     let mut update = state

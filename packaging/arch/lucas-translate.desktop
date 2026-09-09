@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Lucas Translate
+Comment=Translate text and extract text from screenshots
+Exec=lucas-translate
+Icon=lucas-translate
+Terminal=false
+Categories=Utility;
+StartupWMClass=lucas-translate

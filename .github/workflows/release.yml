@@ -7,6 +7,10 @@ concurrency:
   group: signed-release
   cancel-in-progress: false
 jobs:
+  arch:
+    needs: ui
+    if: github.ref == 'refs/heads/main' && github.repository == 'lucaslus/luca-translate'
+    uses: ./.github/workflows/arch.yml
   ui:
     runs-on: ubuntu-24.04
     steps:
@@ -83,7 +87,7 @@ jobs:
             app/src-tauri/target/release/bundle/**/*.deb
             app/src-tauri/target/release/bundle/**/*.rpm
   draft:
-    needs: build
+    needs: [build, arch]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -96,6 +100,10 @@ jobs:
         with:
           pattern: signed-*
           path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: arch-x86_64
+          path: artifacts/arch-x86_64
       - run: node scripts/prepare-release.cjs artifacts dist/release
       - name: Create draft only (review and publish manually)
         env:

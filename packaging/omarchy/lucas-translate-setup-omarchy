@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Install opt-in user configuration without overriding occupied shortcuts."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import time
+
+if os.geteuid() == 0:
+    raise SystemExit("Run this command as your desktop user, without sudo.")
+source = Path('/usr/share/lucas-translate/omarchy/lucas-translate.lua')
+config = Path.home() / '.config/hypr/hyprland.lua'
+target = config.with_name('lucas-translate.lua')
+if not config.is_file() or not source.is_file():
+    raise SystemExit('Requires Omarchy Lua configuration and the installed integration file.')
+bindings = json.loads(subprocess.check_output(['hyprctl', 'binds', '-j']))
+commands = {'t': '--toggle', 'd': '--selection', 's': '--screenshot', 'c': '--ocr'}
+# XKB keycodes for T, D, S, C; also catch keycode-based bindings.
+codes = {28: 't', 40: 'd', 39: 's', 54: 'c'}
+for bind in bindings:
+    key = bind.get('key', '').lower() or codes.get(bind.get('keycode'), '')
+    if bind.get('modmask') == 69 and key in commands:
+        ours = bind.get('description', '').startswith('Translate:') and bind.get('arg') == 'lucas-translate ' + commands[key]
+        # Omarchy wraps o.bind commands in Lua callbacks. Description alone is not ownership proof.
+        ours = ours or (target.exists() and target.read_bytes() == source.read_bytes() and bind.get('description', '').startswith('Translate:'))
+        if not ours:
+            raise SystemExit(f'Conflict: Super+Ctrl+Shift+{key.upper()} — {bind.get("description", "existing binding")}. No files changed.')
+original = config.read_text()
+line = 'dofile(os.getenv("HOME") .. "/.config/hypr/lucas-translate.lua")'
+if target.exists() and target.read_bytes() != source.read_bytes():
+    raise SystemExit(f'{target} has custom changes. Review it manually; nothing overwritten.')
+stamp = time.time_ns()
+shutil.copy2(config, config.with_name(f'hyprland.lua.lucas-backup-{stamp}'))
+previous = target.read_bytes() if target.exists() else None
+try:
+    shutil.copyfile(source, target)
+    if line not in original:
+        config.write_text(original.rstrip() + '\n\n-- Lucas Translate floating panel and shortcuts\n' + line + '\n')
+    subprocess.run(['hyprctl', 'reload'], check=True)
+    errors = subprocess.check_output(['hyprctl', 'configerrors'], text=True).strip()
+    if errors:
+        raise RuntimeError(errors)
+except Exception:
+    config.write_text(original)
+    if previous is None:
+        target.unlink(missing_ok=True)
+    else:
+        target.write_bytes(previous)
+    subprocess.run(['hyprctl', 'reload'], check=False)
+    raise
+print('Installed: Super+Ctrl+Shift+T/D/S/C. Esc hides the main panel. No existing bindings replaced.')

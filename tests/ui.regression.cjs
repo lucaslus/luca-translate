@@ -139,6 +139,7 @@ async function main() {
               return new Promise((resolve) =>
                 (mock.pending[name] ||= []).push(resolve),
               );
+            if (name === "desktop_ready") return new URL(location.href).searchParams.has("omarchy");
             if (name === "service_catalog") return catalogue;
             if (name === "get_services") return structuredClone(mock.values);
             if (name === "set_service") {
@@ -1116,6 +1117,15 @@ async function main() {
     assert.equal(await page.locator("#input").inputValue(),"preserve on Escape");
     assert.equal(await page.evaluate(() => __mock.hidden),true);
     check("idle Escape hides the panel without destroying input");
+    await page.goto(base + "/index.html?omarchy=1");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#input").fill("preserve Omarchy input");
+    await page.locator("#btn-history").click();
+    await page.keyboard.press("Escape");
+    assert.equal(await page.evaluate(() => __mock.hidden), true);
+    assert(await page.locator("#panel").isHidden());
+    assert.equal(await page.locator("#input").inputValue(), "preserve Omarchy input");
+    check("Omarchy Escape closes history and hides immediately without clearing input");
     assert.deepEqual(errors, []);
     check("no uncaught JavaScript errors");
     console.log(

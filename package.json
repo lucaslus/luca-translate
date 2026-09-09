@@ -2,6 +2,7 @@
   "name": "lucas-translate-ui-tests",
   "private": true,
   "scripts": {
+    "build:arch": "cd app && tauri build --no-bundle --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}' -- --locked && cd .. && bash scripts/package-arch.sh",
     "test": "node --test tests/overlay.test.cjs tests/release.test.cjs",
     "test:ui": "node tests/ui.regression.cjs",
     "lint": "eslint app/ui/*.js"

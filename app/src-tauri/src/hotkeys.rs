@@ -68,6 +68,12 @@ pub fn warnings() -> Vec<String> {
         .clone()
 }
 pub fn initialize(app: &AppHandle) {
+    if crate::desktop_control::hyprland() {
+        state().lock().unwrap_or_else(|e| e.into_inner()).warnings = vec![
+            "Omarchy / Hyprland 快捷键由桌面管理：Super+Ctrl+Shift+T 显示/隐藏，D 划词，S 截图翻译，C 静默 OCR。请安装随包提供的 Omarchy 配置；应用内改键不影响桌面绑定。".into(),
+        ];
+        return;
+    }
     let mut state = state().lock().unwrap_or_else(|e| e.into_inner());
     match config::preferences().and_then(|p| parse(&p)) {
         Ok(bindings) => {
@@ -87,6 +93,9 @@ pub fn initialize(app: &AppHandle) {
 }
 pub fn save(app: &AppHandle, p: Preferences) -> Result<(), String> {
     let next = parse(&p)?;
+    if crate::desktop_control::hyprland() {
+        return config::save_preferences(p);
+    }
     let mut state = state().lock().map_err(|_| "快捷键设置不可用")?;
     let mut added = Vec::new();
     for (id, (key, _)) in &next {

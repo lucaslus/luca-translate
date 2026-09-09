@@ -35,6 +35,15 @@ fn xclip_read(selection: &str) -> Option<String> {
 }
 
 pub fn capture_selection_text() -> Option<String> {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        let out = bounded_output(
+            Command::new("wl-paste").args(["--primary", "--no-newline", "--type", "text"]),
+            Duration::from_millis(800),
+        )
+        .ok()?;
+        let text = String::from_utf8(out.stdout).ok()?;
+        return (out.status.success() && !text.trim().is_empty()).then_some(text);
+    }
     // 路径 1：PRIMARY selection（X11 下选中即可读，无需模拟按键）
     if let Some(text) = xclip_read("primary") {
         return Some(text);
@@ -133,7 +142,7 @@ fn ocr_file(path: &Path) -> Result<Vec<String>, String> {
 
 /// Files avoid a full pipe deadlocking the child; deadlines kill and reap it.
 /// Private temporary files are deleted on every return path. Reads are bounded.
-fn bounded_output(
+pub(crate) fn bounded_output(
     command: &mut Command,
     timeout: Duration,
 ) -> Result<std::process::Output, String> {
