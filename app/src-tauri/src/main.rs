@@ -558,6 +558,7 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             desktop_control::desktop_ready,
+            desktop_control::setup_desktop,
             settings_commands::get_preferences,
             settings_commands::set_preferences,
             settings_commands::get_official_config,
@@ -610,6 +611,11 @@ fn main() {
             }
         })
         .setup(|app| {
+            if desktop_control::hyprland() {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_decorations(false)?;
+                }
+            }
             diagnostics::init(app.path().app_log_dir().ok());
             init_data_paths(app.handle())?;
             hotkeys::initialize(app.handle());

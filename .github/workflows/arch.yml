@@ -10,8 +10,10 @@ jobs:
     steps:
       - name: Install Arch build and runtime dependencies
         run: |
-          pacman -Syu --noconfirm --needed git nodejs npm rust webkit2gtk-4.1 gtk3 libayatana-appindicator openssl dbus libxcb libx11 libxrandr xdotool xclip tesseract tesseract-data-eng tesseract-data-chi_sim desktop-file-utils
+          pacman -Syu --noconfirm --needed git nodejs npm rust python lua webkit2gtk-4.1 gtk3 libayatana-appindicator openssl dbus libxcb libx11 libxrandr xdotool xclip tesseract tesseract-data-eng tesseract-data-chi_sim desktop-file-utils
       - uses: actions/checkout@v4
+      - name: Verify Omarchy click dismissal
+        run: lua tests/omarchy.test.lua
       - name: Build and package as an unprivileged user
         env:
           CARGO_BUILD_JOBS: "2"
@@ -21,6 +23,9 @@ jobs:
           runuser -u builder -- bash -c 'cd "$1" && npm ci --ignore-scripts && npm run build:arch' -- "$GITHUB_WORKSPACE"
       - name: Verify package installation and dependencies
         run: |
+          # The minimal Arch image excludes documentation. Install the full payload
+          # here so pacman can verify every file declared by our package.
+          sed -i '/^NoExtract[[:space:]]*=/d' /etc/pacman.conf
           pacman -U --noconfirm dist/arch/*.pkg.tar.zst
           pacman -Qkk lucas-translate
           desktop-file-validate /usr/share/applications/lucas-translate.desktop

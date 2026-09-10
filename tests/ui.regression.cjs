@@ -1119,6 +1119,13 @@ async function main() {
     check("idle Escape hides the panel without destroying input");
     await page.goto(base + "/index.html?omarchy=1");
     await page.waitForLoadState("networkidle");
+    assert(await page.locator(".titlebar").isHidden());
+    assert(await page.locator("#btn-pin").isHidden());
+    assert(await page.locator(".statusbar #btn-settings").isVisible());
+    await page.locator("#btn-settings").click();
+    assert(await page.evaluate(() => __mock.calls.some(c => c.name === "open_settings")));
+    assert(await page.evaluate(() => __mock.calls.some(c => c.name === "setup_desktop")));
+    check("Omarchy hides window controls, keeps settings accessible, and enables integration");
     await page.locator("#input").fill("preserve Omarchy input");
     await page.locator("#btn-history").click();
     await page.keyboard.press("Escape");

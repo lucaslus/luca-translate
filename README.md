@@ -37,9 +37,9 @@ Under active development. See [Releases](https://github.com/lucaslus/luca-transl
 
 ### 安装与更新 / Install & update
 
-**Arch Linux / Omarchy（x86_64）**：下载 Release 中的 `lucas-translate-<版本>-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./lucas-translate-<版本>-1-x86_64.pkg.tar.zst`。安装后在应用菜单打开 **Lucas Translate**，或运行 `lucas-translate`。依赖包含划词工具及中英文 OCR 语言包；API 凭据还需可用且已解锁的 Secret Service（例如 GNOME Keyring）。后续版本使用相同的 `pacman -U` 命令升级；卸载用 `sudo pacman -R lucas-translate`。Omarchy / Hyprland 可启用下方专用集成；其他 Wayland 桌面仍未完整适配。
+**Arch Linux / Omarchy（x86_64）**：下载 Release 中的 `lucas-translate-<版本>-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./lucas-translate-<版本>-1-x86_64.pkg.tar.zst`。安装后在应用菜单打开 **Lucas Translate**，或运行 `lucas-translate`。依赖包含划词工具及中英文 OCR 语言包；API 凭据还需可用且已解锁的 Secret Service（例如 GNOME Keyring）。后续版本使用相同的 `pacman -U` 命令升级；卸载用 `sudo pacman -R lucas-translate`。Omarchy / Hyprland 首次启动会自动启用下方专用集成；其他 Wayland 桌面仍未完整适配。
 
-**Arch Linux / Omarchy (x86_64)**: download the `.pkg.tar.zst` Release asset and install/upgrade with `sudo pacman -U ./lucas-translate-<version>-1-x86_64.pkg.tar.zst`. Launch **Lucas Translate** from the application menu. Native packages include X11 selection and Chinese/English OCR dependencies and use manual package-manager updates. Enable the integration below for Omarchy / Hyprland.
+**Arch Linux / Omarchy (x86_64)**: download the `.pkg.tar.zst` Release asset and install/upgrade with `sudo pacman -U ./lucas-translate-<version>-1-x86_64.pkg.tar.zst`. Launch **Lucas Translate** from the application menu. Native packages include X11 selection and Chinese/English OCR dependencies and use manual package-manager updates. The integration below is enabled automatically on first launch on Omarchy with Lua configuration.
 
 macOS 版本未使用 Apple Developer ID 签名或公证，也不上架 App Store。**确认来自本仓库 Releases** 后，如系统阻止打开，请先尝试启动，再到「系统设置 → 隐私与安全性 → 仍要打开」。这是安装信任确认，与辅助功能/屏幕录制权限不同。无需关闭系统安全保护。[Apple 说明](https://support.apple.com/en-us/102445)
 
@@ -51,18 +51,18 @@ Check for updates in **Settings → About**, then confirm to download, verify, a
 
 ### Omarchy / Hyprland 浮动面板 / Floating panel
 
-使用 Lua 配置的 Omarchy 安装 Arch 包后，执行：
+使用 Lua 配置的 Omarchy 安装 Arch 包后，从应用菜单打开一次 **Lucas Translate**，程序会以当前用户自动启用快捷键与浮窗规则。无需手动配置；自动启用失败时，可在解决提示的问题后运行以下命令重试：
 
-After installing the Arch package on an Omarchy desktop with Lua configuration, run:
+On Omarchy with Lua configuration, open **Lucas Translate** once after installing the Arch package to enable the integration automatically. To retry manually after resolving a reported problem:
 
 ```sh
 sudo pacman -S --needed python wl-clipboard grim slurp
 lucas-translate-setup-omarchy
 ```
 
-第二条命令以当前桌面用户运行，**不要加 sudo**。安装器检查快捷键冲突、备份个人配置并验证重载；发现占用时退出，不覆盖系统绑定。仅安装 pacman 包不会自动修改桌面配置。
+第二条命令以当前桌面用户运行，**不要加 sudo**。安装器检查快捷键冲突、备份个人配置并验证重载；发现占用时退出，不覆盖系统绑定。pacman 安装阶段不修改桌面配置，自动配置在当前用户首次启动应用时完成。
 
-Run the setup command **without sudo**. It checks shortcut conflicts, backs up your configuration, and validates the reload. Occupied shortcuts are not replaced. Installing the package alone does not change desktop configuration.
+Run the setup command **without sudo**. It checks shortcut conflicts, backs up your configuration, and validates the reload. Occupied shortcuts are not replaced. Desktop configuration is applied on the first app launch as the desktop user, not by pacman.
 
 | Omarchy 快捷键 / Shortcut | 功能 / Action |
 | --- | --- |
@@ -70,14 +70,17 @@ Run the setup command **without sudo**. It checks shortcut conflicts, backs up y
 | `Super+Ctrl+Shift+D` | 划词翻译 / Translate selected text |
 | `Super+Ctrl+Shift+S` | 框选截图翻译 / Translate a screenshot region |
 | `Super+Ctrl+Shift+C` | 静默 OCR，仅复制文字 / OCR to clipboard without opening the panel |
+| `Super+Ctrl+Shift+P` | 系统框选截图，复制图片（不做 OCR 或翻译） / Native region screenshot to image clipboard |
 | `Esc` | 隐藏主面板，保留输入；框选时取消 / Hide and preserve input; cancel region selection |
 
+- Omarchy 主面板隐藏原生标题栏和置顶控件，设置入口位于底栏；按 Esc 隐藏。
 - 默认 **420×650 居中浮窗**，可拖动和调整尺寸；应用未运行时快捷键会启动它。
-- **失焦不会自动隐藏**，避免 Wayland 聚焦时序导致划词结果闪现消失。按 Esc、聚焦时再次按切换键或点击关闭按钮隐藏；托盘菜单“退出”才会结束进程。
+- **失焦不会自动隐藏**，避免 Wayland 聚焦时序导致划词结果闪现消失。点击浮窗外部、按 Esc 或聚焦时再次按切换键隐藏；托盘菜单“退出”才会结束进程。
+- **纯截图复制**仅在 Omarchy 提供：调用系统截图工具，先隐藏翻译面板；框选后可直接粘贴图片，Esc 取消，翻译程序未运行时也可用。
 - 快捷键由 Hyprland 管理；修改应用内的 Alt/Option 快捷键不会改变上述绑定。
 - 划词通过 `wl-paste` 读取 PRIMARY 选区；部分应用不支持它，需要手动复制并粘贴。截图通过 `slurp` / `grim`，OCR 在本地执行。
 
-The panel floats centered at **420×650** and can be moved or resized. It explicitly requests compositor focus and **stays visible when focus changes**. Escape and the close button hide it without quitting; use the tray menu to exit. Hyprland owns these shortcuts. Selection capture requires the source application to expose a PRIMARY selection; otherwise copy and paste manually. Region capture uses `slurp` / `grim` with local OCR.
+The panel floats centered at **420×650** and can be moved or resized. It explicitly requests compositor focus and **stays visible when focus changes**. The native title bar and pin control are hidden, with Settings available in the bottom bar. Clicking outside, Escape, or toggling the focused panel hides it without quitting; use the tray menu to exit. Hyprland owns these shortcuts. Selection capture requires the source application to expose a PRIMARY selection; otherwise copy and paste manually. Region capture uses `slurp` / `grim` with local OCR.
 
 配置位置、命令接口和卸载集成方法见 [Omarchy 集成说明 / Integration guide](docs/OMARCHY.md)。
 

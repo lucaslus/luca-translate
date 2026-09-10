@@ -100,6 +100,36 @@ fn schedule(app: &AppHandle, action: Action) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || dispatch(&handle, action));
 }
+
+/// Run the packaged helper as the desktop user, never from pacman's root hooks.
+#[tauri::command]
+pub async fn setup_desktop(window: WebviewWindow) -> Result<(), String> {
+    crate::allow_window(&window, &["main"])?;
+    #[cfg(target_os = "linux")]
+    if hyprland() {
+        tauri::async_runtime::spawn_blocking(|| {
+            let helper = std::path::Path::new("/usr/bin/lucas-translate-setup-omarchy");
+            if !helper.is_file() {
+                return Ok(()); // Source builds and non-Arch packages have no installer.
+            }
+            let output = crate::platform::linux::bounded_output(
+                std::process::Command::new(helper).arg("--auto"),
+                std::time::Duration::from_secs(15),
+            )?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Omarchy 快捷键未自动启用：{}。可运行 lucas-translate-setup-omarchy 重试。",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ))
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+    }
+    Ok(())
+}
 fn dispatch(app: &AppHandle, action: Action) {
     match action {
         Action::Hide => {

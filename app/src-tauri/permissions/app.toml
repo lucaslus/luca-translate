@@ -11,7 +11,7 @@ commands.allow = ["get_preferences", "set_preferences", "get_official_config", "
 [[permission]]
 identifier = "main-actions"
 description = "Translation UI cannot read or replace AI credentials."
-commands.allow = ["desktop_ready", "translate", "cancel_translation", "cancel_ocr", "service_catalog", "capture_selection", "history_list", "history_clear", "favorite_add", "favorites_list", "favorite_remove", "open_permission_settings", "open_settings", "restart_app", "start_screenshot", "get_services", "set_service"]
+commands.allow = ["desktop_ready", "setup_desktop", "translate", "cancel_translation", "cancel_ocr", "service_catalog", "capture_selection", "history_list", "history_clear", "favorite_add", "favorites_list", "favorite_remove", "open_permission_settings", "open_settings", "restart_app", "start_screenshot", "get_services", "set_service"]
 
 [[permission]]
 identifier = "diagnostics-actions"

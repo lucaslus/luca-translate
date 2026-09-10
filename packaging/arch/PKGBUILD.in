@@ -7,9 +7,8 @@ url='https://github.com/lucaslus/luca-translate'
 license=('MIT')
 depends=('glibc' 'gcc-libs' 'gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator'
          'openssl' 'dbus' 'libxcb' 'libx11' 'libxrandr' 'xdotool'
-         'xclip' 'tesseract' 'tesseract-data-eng' 'tesseract-data-chi_sim')
+         'xclip' 'tesseract' 'tesseract-data-eng' 'tesseract-data-chi_sim' 'python')
 optdepends=('gnome-keyring: Secret Service provider for storing API credentials'
-            'python: Omarchy integration installer'
             'wl-clipboard: Wayland selection and OCR clipboard'
             'grim: Hyprland screenshot capture'
             'slurp: Hyprland interactive region selection')

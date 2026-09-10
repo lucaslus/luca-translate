@@ -823,11 +823,6 @@ pin.addEventListener("click", async () => {
     renderPin(!pinned);
   } catch (_) {}
 });
-currentWindow
-  .isAlwaysOnTop()
-  .then(renderPin)
-  .catch(() => renderPin(false))
-  .finally(() => (pin.disabled = false));
 function screenPermission() {
   if (!panel.classList.contains("hidden")) closePanel();
   cancelWork();
@@ -960,6 +955,17 @@ async function init() {
     input.focus();
     resetResult();
     desktopPanel = await invoke("desktop_ready");
+    if (desktopPanel) {
+      document.body.classList.add("omarchy");
+      document.querySelector(".statusbar").append($("btn-settings"));
+      invoke("setup_desktop").catch((err) => toast(String(err), true));
+    } else {
+      currentWindow
+        .isAlwaysOnTop()
+        .then(renderPin)
+        .catch(() => renderPin(false))
+        .finally(() => (pin.disabled = false));
+    }
   } catch (e) {
     empty("界面初始化失败", String(e), [
       button("重新加载", () => location.reload()),

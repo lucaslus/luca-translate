@@ -148,6 +148,7 @@ button { writing-mode: horizontal-tb; }
 
 /* macOS：Overlay 标题栏下给红绿灯留出空间 */
 body.mac .titlebar { padding-left: 76px; }
+body.omarchy .titlebar { display: none; }
 
 /* ---------- 标题栏（可拖拽） ---------- */
 .titlebar {

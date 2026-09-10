@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Install opt-in user configuration without overriding occupied shortcuts."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 
 if os.geteuid() == 0:
@@ -14,24 +16,33 @@ config = Path.home() / '.config/hypr/hyprland.lua'
 target = config.with_name('lucas-translate.lua')
 if not config.is_file() or not source.is_file():
     raise SystemExit('Requires Omarchy Lua configuration and the installed integration file.')
+line = 'dofile(os.getenv("HOME") .. "/.config/hypr/lucas-translate.lua")'
+original = config.read_text()
+# Upgrade only byte-for-byte known shipped integrations; preserve user edits.
+previous_versions = {'05ae18d7254ffb2857b9625e4676ce607eebe4400fc684ef3c564636480b765c', 'd10eb62792817c7ecf466cdae2e2824a339e8fcda2238ccba99608b47d41af96'}
+current = target.read_bytes() if target.is_file() else None
+upgradable = current is not None and current != source.read_bytes() and hashlib.sha256(current).hexdigest() in previous_versions
+managed = current == source.read_bytes() or upgradable
+if '--auto' in sys.argv and line in original and target.is_file() and not upgradable:
+    raise SystemExit(0)
 bindings = json.loads(subprocess.check_output(['hyprctl', 'binds', '-j']))
-commands = {'t': '--toggle', 'd': '--selection', 's': '--screenshot', 'c': '--ocr'}
-# XKB keycodes for T, D, S, C; also catch keycode-based bindings.
-codes = {28: 't', 40: 'd', 39: 's', 54: 'c'}
+commands = {'t': 'lucas-translate --toggle', 'd': 'lucas-translate --selection', 's': 'lucas-translate --screenshot', 'c': 'lucas-translate --ocr', 'p': 'omarchy capture screenshot region copy'}
+# XKB keycodes for T, D, S, C, P; also catch keycode-based bindings.
+codes = {28: 't', 40: 'd', 39: 's', 54: 'c', 33: 'p'}
 for bind in bindings:
     key = bind.get('key', '').lower() or codes.get(bind.get('keycode'), '')
     if bind.get('modmask') == 69 and key in commands:
-        ours = bind.get('description', '').startswith('Translate:') and bind.get('arg') == 'lucas-translate ' + commands[key]
+        ours = bind.get('description', '').startswith('Translate:') and bind.get('arg') == commands[key]
         # Omarchy wraps o.bind commands in Lua callbacks. Description alone is not ownership proof.
-        ours = ours or (target.exists() and target.read_bytes() == source.read_bytes() and bind.get('description', '').startswith('Translate:'))
+        ours = ours or (managed and bind.get('description', '').startswith('Translate:'))
         if not ours:
             raise SystemExit(f'Conflict: Super+Ctrl+Shift+{key.upper()} — {bind.get("description", "existing binding")}. No files changed.')
-original = config.read_text()
-line = 'dofile(os.getenv("HOME") .. "/.config/hypr/lucas-translate.lua")'
-if target.exists() and target.read_bytes() != source.read_bytes():
+if target.exists() and not managed:
     raise SystemExit(f'{target} has custom changes. Review it manually; nothing overwritten.')
 stamp = time.time_ns()
 shutil.copy2(config, config.with_name(f'hyprland.lua.lucas-backup-{stamp}'))
+if target.exists():
+    shutil.copy2(target, target.with_name(f'lucas-translate.lua.lucas-backup-{stamp}'))
 previous = target.read_bytes() if target.exists() else None
 try:
     shutil.copyfile(source, target)
@@ -49,4 +60,4 @@ except Exception:
         target.write_bytes(previous)
     subprocess.run(['hyprctl', 'reload'], check=False)
     raise
-print('Installed: Super+Ctrl+Shift+T/D/S/C. Esc hides the main panel. No existing bindings replaced.')
+print('Installed: Super+Ctrl+Shift+T/D/S/C/P. Esc hides the main panel. No existing bindings replaced.')
