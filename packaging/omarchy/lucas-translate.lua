@@ -1,10 +1,10 @@
 -- Lucas Translate: Omarchy / Hyprland Lua integration.
--- Super+Ctrl+Shift: T toggle, D selection, S translation, C OCR, P image copy.
+-- Super+Ctrl+Shift: T toggle, D selection, S translation, C OCR, P screenshot annotation.
 o.bind("SUPER + CTRL + SHIFT + T", "Translate: show / hide", "lucas-translate --toggle")
 o.bind("SUPER + CTRL + SHIFT + D", "Translate: selection", "lucas-translate --selection")
 o.bind("SUPER + CTRL + SHIFT + S", "Translate: screenshot", "lucas-translate --screenshot")
 o.bind("SUPER + CTRL + SHIFT + C", "Translate: OCR to clipboard", "lucas-translate --ocr")
-o.bind("SUPER + CTRL + SHIFT + P", "Translate: screenshot to clipboard", function()
+o.bind("SUPER + CTRL + SHIFT + P", "Translate: screenshot and annotate", function()
   for _, window in ipairs(hl.get_windows()) do
     if window.class == "lucas-translate" and window.title == "Lucas Translate" and window.mapped then
       hl.dispatch(hl.dsp.window.close({ window = "address:" .. window.address }))
@@ -12,7 +12,13 @@ o.bind("SUPER + CTRL + SHIFT + P", "Translate: screenshot to clipboard", functio
   end
   -- Let the hide animation finish before the system picker freezes the screen.
   -- Runs outside the compositor event loop; also works when Translate is not running.
-  hl.exec_cmd("sleep 0.2; exec omarchy capture screenshot region copy")
+  -- Keep the capture temporary; Enter copies and closes without saving a file.
+  hl.exec_cmd([[sleep 0.2
+capture_dir=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/lucas-capture.XXXXXX") || exit 1
+trap 'rm -rf -- "$capture_dir"' EXIT
+capture=$(OMARCHY_SCREENSHOT_DIR="$capture_dir" omarchy capture screenshot region save) || exit 1
+[ -n "$capture" ] && [ -f "$capture" ] || exit 0
+tensaku --filename "$capture" --actions-on-enter save-to-clipboard --early-exit --copy-command wl-copy --disable-notifications]])
 end)
 o.window("lucas-translate", { float = true, center = true })
 o.window({ class = "lucas-translate", title = "Lucas Translate" }, {

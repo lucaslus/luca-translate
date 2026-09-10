@@ -51,10 +51,14 @@ panel.title = "Lucas Translate"
 windows = { panel }
 screenshot()
 assert(closed[#closed] == "address:0x123", "hide the panel before capture")
-assert(launched == "sleep 0.2; exec omarchy capture screenshot region copy", "use native image-copy flow")
+assert(launched:find('OMARCHY_SCREENSHOT_DIR="$capture_dir"', 1, true), "capture stays in temporary directory")
+assert(launched:find("trap 'rm -rf --", 1, true), "temporary capture is cleaned up")
+assert(launched:find('--actions-on-enter save-to-clipboard --early-exit', 1, true), "Enter copies and closes")
+assert(launched:find('--disable-notifications', 1, true), "no save notification")
+assert(not launched:find('--save-after-copy', 1, true), "copy must not save")
 local count = #closed
 windows = {}
 launched = nil
 screenshot()
 assert(#closed == count and launched, "native capture works without starting Translate")
-print("PASS Omarchy native screenshot copies an image without OCR or translation")
+print("PASS Omarchy native screenshot opens annotation without OCR or translation")
