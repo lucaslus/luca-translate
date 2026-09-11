@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Install Arch build and runtime dependencies
         run: |
-          pacman -Syu --noconfirm --needed git nodejs npm rust python lua webkit2gtk-4.1 gtk3 libayatana-appindicator openssl dbus libxcb libx11 libxrandr xdotool xclip tesseract tesseract-data-eng tesseract-data-chi_sim desktop-file-utils
+          pacman -Syu --noconfirm --needed git nodejs npm rust python lua webkit2gtk-4.1 gtk3 libayatana-appindicator openssl dbus libxcb libx11 libxrandr xdotool xclip tesseract tesseract-data-eng tesseract-data-chi_sim desktop-file-utils gtk4 libadwaita gtk4-layer-shell libepoxy fontconfig
       - uses: actions/checkout@v4
       - name: Verify Omarchy click dismissal
         run: lua tests/omarchy.test.lua

@@ -16,7 +16,7 @@ lucas-translate-setup-omarchy
 | Super + Ctrl + Shift + D | 读取 Wayland PRIMARY 选区并翻译 |
 | Super + Ctrl + Shift + S | 框选截图，OCR 后翻译 |
 | Super + Ctrl + Shift + C | 框选截图，OCR 文字复制到剪贴板，不打开翻译窗口 |
-| Super + Ctrl + Shift + P | 系统框选截图，图片复制到剪贴板，不做 OCR 或翻译 |
+| Super + Ctrl + Shift + P | 系统框选截图并编辑；✔ 复制并关闭，× / Esc / 点击外部丢弃 |
 | Esc | 主界面关闭浮层/取消当前工作后隐藏；截图选区中取消截图 |
 
 主窗口默认浮动、居中，420×650（逻辑像素）。Omarchy 下隐藏原生标题栏和置顶按钮，设置入口移至底栏，按 Esc 隐藏；移动和调整尺寸使用窗口管理器快捷操作。Omarchy 下失焦不会自动隐藏，避免划词完成后的异步聚焦导致窗口闪现消失；点击浮窗外部、按 Esc 或主窗口已聚焦时再次使用切换快捷键隐藏。托盘菜单的“退出”才会退出进程。这是普通 Wayland 应用浮窗，不是 Omarchy menu 的 layer-shell 表面；锁屏或独占全屏上的覆盖不保证。
@@ -27,4 +27,6 @@ lucas-translate-setup-omarchy
 
 撤销集成：从 `~/.config/hypr/hyprland.lua` 删除 Lucas Translate 的 `dofile(...)` 行，删除 `~/.config/hypr/lucas-translate.lua`，重载并检查配置。首次启动会备份并升级已知原版集成；自行修改过的集成不会覆盖。可与 `/usr/share/lucas-translate/omarchy/lucas-translate.lua` 比较后手动更新。
 
-纯截图复制仅在 Omarchy 提供，由桌面绑定直接调用 `omarchy capture screenshot region copy`，不要求翻译应用正在运行。截图前隐藏主面板，框选后复制 PNG 图片；Esc 取消，不保存截图文件。
+截图编辑仅在 Omarchy 提供，不要求翻译应用正在运行。截图前隐藏主面板，框选后打开包内的 `lucas-screenshot-editor`：✔ 复制并关闭；×、Esc 或点击外部丢弃，不改写剪贴板。截图仅使用临时文件，退出后自动清理，不保存到图片目录。
+
+专用编辑器基于 Tensaku 0.29.0 的固定提交构建，补丁只添加确认/取消按钮和优先处理 Esc，不替换系统 `tensaku`。构建方式：`bash scripts/build-screenshot-editor.sh`；本地安装可将 `target/screenshot-editor/source/target/release/tensaku` 复制为 `~/.local/bin/lucas-screenshot-editor`。Arch 打包会自动构建并附带此编辑器、原项目许可和补丁。需要 GTK4、libadwaita、gtk4-layer-shell 及 Rust 构建环境。

@@ -4,10 +4,10 @@ pkgrel=1
 pkgdesc='Desktop translation and offline OCR tool built with Tauri'
 arch=('x86_64')
 url='https://github.com/lucaslus/luca-translate'
-license=('MIT')
+license=('MIT' 'MPL-2.0')
 depends=('glibc' 'gcc-libs' 'gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator'
          'openssl' 'dbus' 'libxcb' 'libx11' 'libxrandr' 'xdotool'
-         'xclip' 'tesseract' 'tesseract-data-eng' 'tesseract-data-chi_sim' 'python')
+         'xclip' 'tesseract' 'tesseract-data-eng' 'tesseract-data-chi_sim' 'python' 'gtk4' 'libadwaita' 'gtk4-layer-shell' 'libepoxy' 'fontconfig')
 optdepends=('gnome-keyring: Secret Service provider for storing API credentials'
             'wl-clipboard: Wayland selection and OCR clipboard'
             'grim: Hyprland screenshot capture'

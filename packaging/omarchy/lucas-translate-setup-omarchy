@@ -19,7 +19,7 @@ if not config.is_file() or not source.is_file():
 line = 'dofile(os.getenv("HOME") .. "/.config/hypr/lucas-translate.lua")'
 original = config.read_text()
 # Upgrade only byte-for-byte known shipped integrations; preserve user edits.
-previous_versions = {'34fb230dcdc87c78de5dec3aa1b70573910eaa89fc8652f150e689b146e18d91', 'f5761e588225d3adaea5bafdd68d20ff848d796061fa1c3d37de2aac5d762077', '05ae18d7254ffb2857b9625e4676ce607eebe4400fc684ef3c564636480b765c', 'd10eb62792817c7ecf466cdae2e2824a339e8fcda2238ccba99608b47d41af96'}
+previous_versions = {'f24b0b707eafd459d5e430831659dbcac6891e4138b7dbcb3201ad41af2a3590', '34fb230dcdc87c78de5dec3aa1b70573910eaa89fc8652f150e689b146e18d91', 'f5761e588225d3adaea5bafdd68d20ff848d796061fa1c3d37de2aac5d762077', '05ae18d7254ffb2857b9625e4676ce607eebe4400fc684ef3c564636480b765c', 'd10eb62792817c7ecf466cdae2e2824a339e8fcda2238ccba99608b47d41af96'}
 current = target.read_bytes() if target.is_file() else None
 upgradable = current is not None and current != source.read_bytes() and hashlib.sha256(current).hexdigest() in previous_versions
 managed = current == source.read_bytes() or upgradable

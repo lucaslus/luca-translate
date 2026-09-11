@@ -1,0 +1,72 @@
+diff --git i/build.rs w/build.rs
+index 04f0ce3..c1b4c72 100644
+--- i/build.rs
++++ w/build.rs
+@@ -103,6 +103,7 @@ fn main() -> Result<(), io::Error> {
+             // hover, plus the toolbar button that creates it.
+             "pin-regular",
+             "dismiss-regular",
++            "checkmark-regular",
+             "link-regular",
+             // The pin's drag-out handle: six dots, the same shape file
+             // managers use for "pick this up and take it somewhere".
+diff --git i/src/main.rs w/src/main.rs
+index e66aa68..e7c7b4d 100644
+--- i/src/main.rs
++++ w/src/main.rs
+@@ -1454,6 +1454,21 @@ impl Component for App {
+         sender: ComponentSender<Self>,
+     ) -> ComponentParts<Self> {
+         Self::apply_style();
++        // Screenshot sessions discard immediately, including while a tool has focus.
++        let cancel_key = gtk::EventControllerKey::new();
++        cancel_key.set_propagation_phase(gtk::PropagationPhase::Capture);
++        let weak_window = root.downgrade();
++        cancel_key.connect_key_pressed(move |_, key, _, _| {
++            if key == gtk::gdk::Key::Escape {
++                if let Some(window) = weak_window.upgrade() {
++                    window.close();
++                }
++                return gtk::glib::Propagation::Stop;
++            }
++            gtk::glib::Propagation::Proceed
++        });
++        root.add_controller(cancel_key);
++
+         let AppInit {
+             image,
+             initial_toast,
+diff --git i/src/ui/toolbars.rs w/src/ui/toolbars.rs
+index f3307c0..dfc8c05 100644
+--- i/src/ui/toolbars.rs
++++ w/src/ui/toolbars.rs
+@@ -3483,6 +3483,29 @@ impl Component for ToolsToolbar {
+             set_end_widget = &gtk::Box {
+                 set_orientation: gtk::Orientation::Horizontal,
+ 
++                gtk::Button {
++                    set_icon_name: "checkmark-regular",
++                    set_valign: gtk::Align::Center,
++                    add_css_class: "flat",
++                    set_tooltip_text: Some("确认：复制到剪贴板并关闭"),
++                    set_focus_on_click: false,
++                    connect_clicked[sender] => move |_| {
++                        sender.output_sender().emit(ToolbarEvent::CopyClipboard);
++                    },
++                },
++                gtk::Button {
++                    set_icon_name: "dismiss-regular",
++                    set_valign: gtk::Align::Center,
++                    add_css_class: "flat",
++                    set_tooltip_text: Some("取消：丢弃截图 (Esc)"),
++                    set_focus_on_click: false,
++                    connect_clicked => move |button| {
++                        if let Some(window) = button.root().and_downcast::<gtk::Window>() {
++                            window.close();
++                        }
++                    },
++                },
++
+                 // Normal end cluster — color picker + copy/save
+                 // actions. Hidden in Crop mode; the Cancel/Crop
+                 // buttons take over the right edge instead. The

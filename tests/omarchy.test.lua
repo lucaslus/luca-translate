@@ -62,3 +62,25 @@ launched = nil
 screenshot()
 assert(#closed == count and launched, "native capture works without starting Translate")
 print("PASS Omarchy native screenshot opens annotation without OCR or translation")
+
+-- Only this integration's editor is dismissed; ordinary Tensaku windows stay open.
+local editor = {
+  class = "dev.tensaku.Tensaku", title = "Lucas Screenshot", address = "0x456",
+  mapped = true, visible = true, at = { x = 0, y = 0 }, size = { x = 600, y = 400 },
+}
+windows = { editor }
+cursor = { x = 300, y = 100 }
+local before = #closed
+bindings[1]()
+assert(#closed == before, "editing inside must not dismiss")
+cursor = { x = 700, y = 100 }
+bindings[1]()
+assert(#closed == before + 1 and closed[#closed] == "address:0x456", "outside click discards exact editor")
+editor.visible = false
+bindings[1]()
+assert(#closed == before + 1, "editor on a hidden workspace stays open")
+editor.visible = true
+editor.title = "Tensaku"
+bindings[1]()
+assert(#closed == before + 1, "ordinary Tensaku windows stay open")
+print("PASS dedicated screenshot editor outside-click cancellation")

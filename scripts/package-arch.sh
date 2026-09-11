@@ -8,10 +8,15 @@ node scripts/prepare-release.cjs --check-version
 version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
 binary=${1:-$root/app/src-tauri/target/release/lucas-translate}
 [[ -x "$binary" ]] || { echo "Missing release binary: $binary" >&2; exit 1; }
+bash "$root/scripts/build-screenshot-editor.sh"
 out="$root/dist/arch"
 mkdir -p "$out"
 stage=$(mktemp -d "$out/build.XXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
+install -Dm755 "$root/target/screenshot-editor/source/target/release/tensaku" "$stage/payload/usr/bin/lucas-screenshot-editor"
+for file in LICENSE NOTICE clipboard-controls.patch; do
+  install -Dm644 "packaging/omarchy/editor/$file" "$stage/payload/usr/share/licenses/lucas-translate/editor/$file"
+done
 install -Dm755 "$binary" "$stage/payload/usr/bin/lucas-translate"
 install -Dm644 packaging/arch/lucas-translate.desktop "$stage/payload/usr/share/applications/lucas-translate.desktop"
 install -Dm644 app/src-tauri/icons/128x128.png "$stage/payload/usr/share/icons/hicolor/128x128/apps/lucas-translate.png"

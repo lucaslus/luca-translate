@@ -18,7 +18,7 @@ capture_dir=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/lucas-capture.XXXXXX") || exit
 trap 'rm -rf -- "$capture_dir"' EXIT
 capture=$(OMARCHY_SCREENSHOT_DIR="$capture_dir" omarchy capture screenshot region save) || exit 1
 [ -n "$capture" ] && [ -f "$capture" ] || exit 0
-tensaku --filename "$capture" --actions-on-enter save-to-clipboard --early-exit --copy-command wl-copy --disable-notifications]])
+lucas-screenshot-editor --title "Lucas Screenshot" --filename "$capture" --actions-on-enter save-to-clipboard --early-exit --actions-on-escape exit --copy-command wl-copy --disable-notifications]])
 end)
 o.window("lucas-translate", { float = true, center = true })
 o.window({ class = "lucas-translate", title = "Lucas Translate" }, {
@@ -29,12 +29,13 @@ o.window({ class = "lucas-translate", title = "Lucas Translate" }, {
 local function dismiss_outside()
   local cursor = hl.get_cursor_pos()
   for _, window in ipairs(hl.get_windows()) do
-    if window.class == "lucas-translate" and window.title == "Lucas Translate"
-        and window.mapped and window.visible then
+    local is_panel = window.class == "lucas-translate" and window.title == "Lucas Translate"
+    local is_editor = window.class == "dev.tensaku.Tensaku" and window.title == "Lucas Screenshot"
+    if (is_panel or is_editor) and window.mapped and window.visible then
       local at, size = window.at, window.size
       if cursor.x < at.x or cursor.x >= at.x + size.x
           or cursor.y < at.y or cursor.y >= at.y + size.y then
-        -- CloseRequested hides the existing panel; never launch a process on clicks.
+        -- CloseRequested hides the panel or discards the dedicated screenshot editor.
         hl.dispatch(hl.dsp.window.close({ window = "address:" .. window.address }))
       end
     end
