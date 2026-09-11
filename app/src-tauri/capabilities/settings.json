@@ -1,5 +1,5 @@
 {
   "identifier": "settings",
   "windows": ["settings"],
-  "permissions": ["settings-actions", "settings-upgrade", "diagnostics-actions", "autostart:default"]
+  "permissions": ["core:window:allow-destroy", "settings-actions", "settings-upgrade", "diagnostics-actions", "autostart:default"]
 }

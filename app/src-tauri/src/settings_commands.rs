@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, WebviewWindow};
 pub async fn get_preferences(window: WebviewWindow) -> Result<serde_json::Value, String> {
     allow_window(&window, &["main", "settings"])?;
     let preferences = storage(config::preferences).await?;
-    Ok(serde_json::json!({"preferences":preferences,"warnings":hotkeys::warnings()}))
+    Ok(serde_json::json!({"preferences":preferences,"warnings":hotkeys::warnings(),"desktop_managed":crate::desktop_control::hyprland()}))
 }
 #[tauri::command]
 pub async fn set_preferences(
@@ -64,4 +64,11 @@ pub async fn test_official_connection(window: WebviewWindow) -> Result<(), Strin
             .map_err(|e| e.to_string())
     })
     .await
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    allow_window(&window, &["settings"])?;
+    app.exit(0);
+    Ok(())
 }

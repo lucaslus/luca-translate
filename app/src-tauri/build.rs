@@ -10,6 +10,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "desktop_ready",
             "setup_desktop",
+            "quit_app",
             "get_preferences",
             "set_preferences",
             "get_official_config",

@@ -49,6 +49,7 @@ static OVERLAY_ACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 #[derive(serde::Serialize)]
 struct PermissionStatus {
     platform: &'static str,
+    desktop_managed: bool,
     accessibility: bool,
     screen_capture: bool,
 }
@@ -559,6 +560,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_control::desktop_ready,
             desktop_control::setup_desktop,
+            settings_commands::quit_app,
             settings_commands::get_preferences,
             settings_commands::set_preferences,
             settings_commands::get_official_config,
@@ -822,6 +824,7 @@ async fn set_ai_config(
 fn permission_status() -> PermissionStatus {
     PermissionStatus {
         platform: std::env::consts::OS,
+        desktop_managed: desktop_control::hyprland(),
         accessibility: platform::accessibility_available(),
         screen_capture: platform::screen_capture_available(),
     }

@@ -88,7 +88,7 @@ async function main() {
       : route.abort(),
   );
   await context.addInitScript(
-    ({ catalogue }) => {
+    ({ catalogue, settingsCanDestroy }) => {
       const listeners = {};
       const mock = (window.__mock = {
         calls: [],
@@ -114,7 +114,12 @@ async function main() {
           mock.closeRequest = fn;
         },
         close: async () => {
-          mock.closed = true;
+          let prevented = false;
+          await mock.closeRequest?.({ preventDefault() { prevented = true; } });
+          if (!prevented) {
+            if (mock.closeRequest && !settingsCanDestroy) throw Error("window.destroy not allowed");
+            mock.closed = true;
+          }
         },
       };
       window.__TAURI__ = {
@@ -158,12 +163,12 @@ async function main() {
                 model: "mock",
                 has_api_key: true,
               };
-            if (name === "get_preferences") return {preferences: mock.preferences || {font_size:14,shortcuts:{input:"Alt+A",selection:"Alt+D",screenshot:"Alt+S",ocr:"Alt+C"}}, warnings:[]};
+            if (name === "get_preferences") return {preferences: mock.preferences || {font_size:14,shortcuts:{input:"Alt+A",selection:"Alt+D",screenshot:"Alt+S",ocr:"Alt+C"}}, warnings:[],desktop_managed:new URL(location.href).searchParams.has("omarchy")};
             if (name === "set_preferences") { mock.preferences = args.preferences; return; }
             if (name === "get_official_config") return {enabled:false,pro:false,has_api_key:true};
             if (name === "check_update") return {current:"0.1.0", version:"0.2.0", installable:true};
             if (name === "permission_status")
-              return { accessibility: true, screen_capture: true };
+              return { accessibility: true, screen_capture: true, platform: new URL(location.href).searchParams.has("omarchy") ? "linux" : "macos", desktop_managed: new URL(location.href).searchParams.has("omarchy") };
             if (name === "diagnostics_status")
               return {
                 available: true,
@@ -178,7 +183,7 @@ async function main() {
         value: { writeText: async (text) => (mock.copied = text) },
       });
     },
-    { catalogue },
+    { catalogue, settingsCanDestroy: require("../app/src-tauri/capabilities/settings.json").permissions.includes("core:window:allow-destroy") },
   );
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -929,6 +934,13 @@ async function main() {
     await page.setViewportSize({ width: 640, height: 470 });
     await page.goto(base + "/settings.html");
     await page.waitForLoadState("networkidle");
+    await page.locator("#settings-close").click();
+    await page.waitForFunction(() => __mock.closed);
+    await page.evaluate(() => { delete __mock.closed; });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => __mock.closed);
+    await page.evaluate(() => { delete __mock.closed; });
+    check("clean settings close through button and Escape with destroy permission");
     await page.locator('[data-view="services"]').click();
     await page.waitForSelector('input[data-svc="bing"]');
     assert.equal(await page.locator('input[data-svc="baidu"]').count(), 0);
@@ -971,7 +983,21 @@ async function main() {
     assert.equal(await page.evaluate(() => __mock.closed), undefined);
     await page.getByRole("button", { name: "取消", exact: true }).click();
     assert.equal(await page.locator("#ai-model").inputValue(), "new-model");
-    check("dirty AI settings require confirmation before close");
+    await page.locator("#settings-close").click();
+    await page.waitForSelector("dialog[open]");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.evaluate(() => __mock.closed), undefined);
+    await page.locator("#settings-close").click();
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    await page.waitForFunction(() => __mock.closed);
+    await page.evaluate(() => { delete __mock.closed; });
+    await page.locator("#settings-quit").click();
+    await page.getByRole("button", { name: "取消", exact: true }).click();
+    assert.equal(await page.evaluate(() => __mock.calls.some(c => c.name === "quit_app")), false);
+    await page.locator("#settings-quit").click();
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    await page.waitForFunction(() => __mock.calls.some(c => c.name === "quit_app"));
+    check("dirty settings close and quit support cancel and discard; Escape cancels dialog");
     await page.screenshot({ path: join(output, "settings-light.png") });
     await page.locator('[data-view="permissions"]').click();
     await page.evaluate(() => __mock.reject.push("permission_status"));
@@ -1117,6 +1143,17 @@ async function main() {
     assert.equal(await page.locator("#input").inputValue(),"preserve on Escape");
     assert.equal(await page.evaluate(() => __mock.hidden),true);
     check("idle Escape hides the panel without destroying input");
+    await page.goto(base + "/settings.html?omarchy=1");
+    await page.waitForLoadState("networkidle");
+    await page.locator('[data-view="hotkeys"]').click();
+    assert(await page.locator("#hotkey-save").isHidden());
+    assert((await page.locator("#hotkey-hint").textContent()).includes("hyprctl reload"));
+    await page.locator('[data-view="permissions"]').click();
+    assert((await page.locator("#view-permissions").textContent()).includes("Wayland PRIMARY"));
+    assert(await page.locator("#open-accessibility").isHidden());
+    await page.locator("#settings-quit").click();
+    await page.waitForFunction(() => __mock.calls.some(c => c.name === "quit_app"));
+    check("Omarchy settings show desktop shortcut management, Wayland guidance and working quit");
     await page.goto(base + "/index.html?omarchy=1");
     await page.waitForLoadState("networkidle");
     assert(await page.locator(".titlebar").isHidden());

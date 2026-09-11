@@ -6,7 +6,8 @@
     preferencesDirty = false,
     fontDirty = false,
     saving = false,
-    updating = false;
+    updating = false,
+    desktopManaged = true;
   window.LucasSettingsDirty = () =>
     officialDirty || preferencesDirty || fontDirty || saving || updating;
   window.LucasSettingsBusy = () => saving || updating;
@@ -226,7 +227,7 @@
   const hotkeySave = button(
     "保存快捷键",
     async () => {
-      if (!preferences || saving) return;
+      if (!preferences || saving || desktopManaged) return;
       saving = true;
       hotkeySave.disabled = true;
       hotkeyStatus.textContent = "正在检查并保存…";
@@ -261,6 +262,7 @@
     .querySelector(".group")
     .before(
       el("p", {
+        id: "hotkey-hint",
         class: "rule-hint",
         text: "输入组合键，例如 Alt+A、Ctrl+Shift+D；macOS 的 Command 写作 Super。留空禁用。冲突时保留原设置。",
       }),
@@ -270,11 +272,17 @@
     try {
       const data = await window.LucasPreferences.refresh();
       preferences = data.preferences;
+      desktopManaged = !!data.desktop_managed;
+      hotkeys.hidden = desktopManaged;
+      $("hotkey-hint").textContent = desktopManaged
+        ? "Omarchy / Hyprland 快捷键由桌面管理。请在 ~/.config/hypr/lucas-translate.lua 中修改，执行 hyprctl reload 和 hyprctl configerrors 检查。随包默认绑定为 Super+Ctrl+Shift+T / D / S / C（显示、划词、截图翻译、截图取字）；自定义绑定以桌面配置为准。"
+        : "输入组合键，例如 Alt+A、Ctrl+Shift+D；macOS 的 Command 写作 Super。留空禁用。冲突时保留原设置。";
       if (!fontDirty) font.value = String(preferences.font_size);
       for (const action of Object.keys(labels))
         $("hotkey-" + action).value = preferences.shortcuts[action] || "";
       hotkeyStatus.textContent = data.warnings.join("；");
-      fontSave.disabled = hotkeySave.disabled = false;
+      fontSave.disabled = false;
+      hotkeySave.disabled = desktopManaged;
     } catch (_) {
       hotkeyStatus.textContent = "读取失败，重新进入此页可重试";
       fontStatus.textContent = "设置暂时无法读取";
@@ -380,7 +388,7 @@
           { class: "field" },
           el("p", {
             class: "rule-hint",
-            text: "手动检查，确认后安装。更新包会验证项目签名；未进行 Apple 公证。",
+            text: "手动检查，确认后安装。更新包会验证项目签名；通过包管理器安装的版本请使用原渠道更新。",
           }),
           updateStatus,
           progress,

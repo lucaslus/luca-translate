@@ -21,4 +21,4 @@ commands.allow = ["diagnostics_status", "open_diagnostics"]
 [[permission]]
 identifier = "settings-actions"
 description = "Settings UI cannot read history or invoke capture."
-commands.allow = ["service_catalog", "get_services", "set_service", "get_routing", "set_routing", "get_ai_config", "set_ai_config", "permission_status", "open_permission_settings"]
+commands.allow = ["quit_app", "service_catalog", "get_services", "set_service", "get_routing", "set_routing", "get_ai_config", "set_ai_config", "permission_status", "open_permission_settings"]
