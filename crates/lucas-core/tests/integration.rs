@@ -23,6 +23,38 @@ fn network_youdao_dict_has_phonetics() {
 }
 
 #[test]
+fn network_youdao_long_translation_keeps_the_final_sentence() {
+    use lucas_core::services::{youdao_dict::YoudaoDict, TranslateService};
+
+    let text = concat!(
+        "The morning train arrived at the station before sunrise. ",
+        "A traveler carried a red suitcase and a small notebook. ",
+        "She wanted to visit a quiet village near the mountains. ",
+        "The road from the station passed through fields of flowers. ",
+        "A farmer showed her the path to an old stone bridge. ",
+        "On the other side of the river, children were playing outside a school. ",
+        "She stopped at a bakery and bought fresh bread for breakfast. ",
+        "The owner told her about a festival planned for the following evening. ",
+        "Later she climbed a hill and watched clouds move slowly across the valley. ",
+        "At the end of the day, she wrote a letter to her family. ",
+        "The final sentence says that a purple elephant is dancing beside a silver bicycle."
+    );
+    assert!(text.len() > 600);
+    let translated = YoudaoDict
+        .translate(text, "en", "zh-Hans")
+        .unwrap()
+        .join("\n");
+    assert!(
+        translated.contains("火车"),
+        "missing opening sentence: {translated}"
+    );
+    assert!(
+        translated.contains("紫") && translated.contains("象") && translated.contains("自行车"),
+        "missing final sentence: {translated}"
+    );
+}
+
+#[test]
 fn network_route_word_gives_dict_and_phonetics() {
     let r = route("excellent", "auto", "auto").expect("route failed");
     assert!(r.dict.is_some(), "单词输入必须走词典路由");
