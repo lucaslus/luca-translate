@@ -26,13 +26,17 @@
 ### 第一梯队（免密钥，默认启用）
 | 服务 | 类型 | 通道 | 说明 |
 |---|---|---|---|
-| 有道词典 | 词典+翻译 | `dict.youdao.com/jsonapi_s`（POST, keyfrom=webdict） | 单词返回英/美音标；整句也能翻 |
+| 有道词典 | 英语查词+多语种句子翻译 | `dict.youdao.com/jsonapi_s`（POST, keyfrom=webdict，附网页签名） | 英语单词返回英/美音标；支持简体中文与英、西、法、德、日、韩、俄语的句子互译 |
 | **DeepL 免费** | 翻译 | `oneshot-free.www.deepl.com/v1/translate` | 免费网页通道，可能限流或变更，不承诺可用性 |
 | **DeepL 官方 API** | 翻译 | `api-free.deepl.com/v2/translate` / `api.deepl.com/v2/translate` | 可选，默认关闭；在设置中配置 Free/Pro 账户和密钥 |
 | Bing | 翻译 | 网页翻译接口 | 免费通道，动态获取会话信息 |
 | OpenAI 兼容 / Ollama | 翻译 | 用户自填 endpoint + model | 已支持；密钥使用系统凭据存储 |
 | Google 免费端点 | 翻译 | `translate.googleapis.com/translate_a/single?client=gtx` | 降级通道；注意反爬（Sorry 页） |
 | 有道发音 | TTS | `dict.youdao.com/dictvoice?type=1/2` | 英式 type=1，美式 type=2，直接可播 |
+
+有道请求需按[官方网页客户端](https://shared.ydstatic.com/market/souti/web_dict/online/3.1.0/dist/client/76bdd54.js)生成 `t` / `sign`（2026-09-17 核对）；`t` 使用 JavaScript 的 UTF-16 字符串长度。缺少签名时，`farewell` 和 `preps` 实测收到 HTTP 200，却返回其他单词，导致解析失败。现在词典和整句翻译均使用签名，并校验响应回显的原文，拒绝错配结果。两词均有真实接口回归测试；修复需重新构建、安装并重启应用后生效。公开网页签名参数可能随上游改版而变化。
+
+同日排查西班牙语句子时，发现原实现将非中英语向在本地直接拦截，并固定 `le=en`。实测 `le` 指定与中文互译的外语：西译中和中译西均使用 `le=es`，其余已验证语种同理；固定英语参数会产生夹杂原文的错误翻译。现在按源/目标语言选择 `le`，并要求响应 `fanyi.type` 与请求语向一致。14 个句子翻译方向以及用户报告的西班牙语句子均有真实接口测试。当前尚不支持外语之间直接互译、繁体中文语向，以及非英语专用词典结构；不将英语释义当作其他语种的结果。
 
 **桌面端并行返回**：只请求已启用的渠道，失败仅影响该卡片，不自动重复发送或切换付费服务。共享 HTTP 连接池，取消会终止网络等待；成功结果按文本、语向、服务和配置隔离，内存缓存有效期 5 分钟，上限 128 条 / 约 2 MiB 载荷，不缓存失败。429 等可重试错误采用按渠道冷却，避免重试风暴。
 

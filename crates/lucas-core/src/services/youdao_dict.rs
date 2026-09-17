@@ -6,11 +6,15 @@
 //!
 //! 该接口即 Bob 第三方插件（如 Free 有道翻译）所用通道，无需密钥。
 
+use md5::{Digest, Md5};
 use serde_json::Value;
 
 use super::{DictCard, DictService, ServiceError, TranslateService};
 
 const API: &str = "https://dict.youdao.com/jsonapi_s?doctype=json&jsonversion=4";
+// Public web client signing key, observed in Youdao's web_dict 3.1.0 client
+// (76bdd54.js) on 2026-09-17. Unsigned requests can return unrelated words.
+const WEB_SIGN_KEY: &str = "Mk6hqtUp33DGGtoS63tTJbMUYjRrG1Lu";
 // This endpoint truncated 701/1200-character English inputs around character 600.
 // A conservative UTF-8 byte budget also fits character/UTF-16 based limits.
 const MAX_QUERY_BYTES: usize = 500;
@@ -23,7 +27,8 @@ pub(super) struct DictionaryOutput {
 }
 
 impl YoudaoDict {
-    fn request_once(&self, text: &str) -> Result<Value, ServiceError> {
+    fn request_once(&self, text: &str, language: &str) -> Result<Value, ServiceError> {
+        let (t, sign) = request_signature(text);
         let resp = crate::http::post(API)
             .timeout(std::time::Duration::from_secs(15))
             // 浏览器 UA：降低被风控返回空结果的概率
@@ -32,20 +37,27 @@ impl YoudaoDict {
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
             .set("Referer", "https://dict.youdao.com/")
-            .send_form(&[("q", text), ("keyfrom", "webdict"), ("client", "web")])
+            .send_form(&[
+                ("q", text),
+                ("le", language),
+                ("t", &t),
+                ("client", "web"),
+                ("sign", &sign),
+                ("keyfrom", "webdict"),
+            ])
             ?;
         resp.into_json::<Value>()
     }
 
-    fn request(&self, text: &str) -> Result<Value, ServiceError> {
+    fn request(&self, text: &str, language: &str) -> Result<Value, ServiceError> {
         // Empty/invalid responses are surfaced, never retried blindly.
-        self.request_once(text)
+        self.request_once(text, language)
     }
 
     pub(super) fn lookup_or_translate(&self, text: &str) -> Result<DictionaryOutput, ServiceError> {
         // Word-like phrases need not have a dictionary entry. Reuse the translation
         // in the same response instead of failing or issuing a second request.
-        Self::parse_dictionary_output(&self.request(text)?, text)
+        Self::parse_dictionary_output(&self.request(text, "en")?, text)
     }
 
     fn parse_dictionary_output(data: &Value, text: &str) -> Result<DictionaryOutput, ServiceError> {
@@ -70,12 +82,13 @@ impl DictService for YoudaoDict {
     }
 
     fn lookup(&self, text: &str) -> Result<DictCard, ServiceError> {
-        Self::parse_dictionary(&self.request(text)?, text)
+        Self::parse_dictionary(&self.request(text, "en")?, text)
     }
 }
 
 impl YoudaoDict {
     fn parse_dictionary(data: &Value, text: &str) -> Result<DictCard, ServiceError> {
+        validate_response_input(data, text)?;
         let ec = data.pointer("/ec/word").ok_or_else(missing_content)?;
 
         let word = ec
@@ -149,21 +162,73 @@ impl YoudaoDict {
     }
 }
 
+fn request_signature(text: &str) -> (String, String) {
+    // Match JavaScript String.length, including surrogate pairs for emoji.
+    let t = ((text.encode_utf16().count() + "webdict".len()) % 10).to_string();
+    let query_hash = format!("{:x}", Md5::digest(format!("{text}webdict")));
+    let sign = format!(
+        "{:x}",
+        Md5::digest(format!("web{text}{t}{WEB_SIGN_KEY}{query_hash}"))
+    );
+    (t, sign)
+}
+
 impl TranslateService for YoudaoDict {
     fn name(&self) -> &'static str {
         "YoudaoDict"
     }
 
     fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
-        // This anonymous endpoint cannot select arbitrary language pairs.
-        let source = crate::lang::source_hint(text, from);
-        if !matches!((source, to), ("en", "zh-Hans") | ("zh-Hans", "en")) {
-            return Err(ServiceError::Unsupported(
-                "有道免费通道仅支持中英互译，请使用其他渠道".into(),
-            ));
-        }
-        translate_with_request(text, to, |chunk| self.request(chunk))
+        translate_for_languages(text, from, to, |chunk, language| {
+            self.request(chunk, language)
+        })
     }
+}
+
+// `le` selects the foreign side of a Chinese/foreign pair, in both directions.
+// These pairs were checked against the live endpoint. Other pairs remain
+// unsupported here rather than silently returning a different target language.
+fn query_language<'a>(from: &'a str, to: &'a str) -> Result<&'a str, ServiceError> {
+    let language = match (from, to) {
+        ("zh-Hans", other) | (other, "zh-Hans") => other,
+        _ => "",
+    };
+    if matches!(language, "en" | "es" | "fr" | "de" | "ja" | "ko" | "ru") {
+        Ok(language)
+    } else {
+        Err(ServiceError::Unsupported(
+            "有道词典通道支持简体中文与英、西、法、德、日、韩、俄语互译".into(),
+        ))
+    }
+}
+
+fn validate_translation_language(data: &Value, from: &str, to: &str) -> Result<(), ServiceError> {
+    if !data.get("fanyi").is_none_or(Value::is_null) {
+        let provider_code = |code| if code == "zh-Hans" { "zh-CHS" } else { code };
+        let expected = format!("{}2{}", provider_code(from), provider_code(to));
+        if data.pointer("/fanyi/type").and_then(Value::as_str) != Some(expected.as_str()) {
+            return Err(ServiceError::Parse("有道返回的翻译语向与请求不一致".into()));
+        }
+    } else if (from, to) != ("en", "zh-Hans") {
+        // Only English->Chinese can use the English dictionary fallback.
+        return Err(missing_content());
+    }
+    Ok(())
+}
+
+fn translate_for_languages(
+    text: &str,
+    from: &str,
+    to: &str,
+    mut request: impl FnMut(&str, &str) -> Result<Value, ServiceError>,
+) -> Result<Vec<String>, ServiceError> {
+    let source = crate::lang::source_hint(text, from);
+    let language = query_language(source, to)?;
+    translate_with_request(text, to, |chunk| {
+        let data = request(chunk, language)?;
+        validate_translation_language(&data, source, to)?;
+        Ok(data)
+    })
 }
 
 // Keep requests sequential: the HTTP layer retains the calling thread's
@@ -188,7 +253,7 @@ fn translate_with_request(
         }
         let data = request(chunk)?;
         // For split translations, every chunk must have a verifiable source.
-        if chunked && translated_input(&data).is_none() {
+        if chunked && response_input(&data).is_none() {
             return Err(incomplete_translation());
         }
         let paragraphs = match translation_paragraphs(&data, chunk)? {
@@ -209,7 +274,7 @@ fn translate_with_request(
         if !translated.is_empty() {
             if newlines > 0 {
                 translated.extend(std::iter::repeat_n('\n', newlines));
-            } else if to == "en" {
+            } else if !matches!(to, "zh-Hans" | "zh-Hant" | "ja") {
                 translated.push(' ');
             }
         }
@@ -274,16 +339,16 @@ fn incomplete_translation() -> ServiceError {
     ServiceError::Parse("有道未返回完整原文对应的译文".into())
 }
 
-fn translated_input(data: &Value) -> Option<&str> {
+fn response_input(data: &Value) -> Option<&str> {
     ["/fanyi/input", "/input", "/meta/input"]
         .iter()
         .find_map(|path| data.pointer(path).and_then(Value::as_str))
 }
 
-fn translation_paragraphs(data: &Value, text: &str) -> Result<Option<Vec<String>>, ServiceError> {
+fn validate_response_input(data: &Value, text: &str) -> Result<(), ServiceError> {
     // The service can normalize spaces/newlines. All non-whitespace source
     // characters must still be present, in order; a nonempty tran is not enough.
-    if let Some(input) = translated_input(data) {
+    if let Some(input) = response_input(data) {
         if !input
             .chars()
             .filter(|c| !c.is_whitespace())
@@ -292,6 +357,11 @@ fn translation_paragraphs(data: &Value, text: &str) -> Result<Option<Vec<String>
             return Err(incomplete_translation());
         }
     }
+    Ok(())
+}
+
+fn translation_paragraphs(data: &Value, text: &str) -> Result<Option<Vec<String>>, ServiceError> {
+    validate_response_input(data, text)?;
     let paragraphs: Vec<String> = match data.pointer("/fanyi/tran") {
         Some(Value::String(s)) if !s.trim().is_empty() => vec![s.clone()],
         Some(Value::Array(values)) => values
@@ -316,6 +386,144 @@ mod tests {
 
     fn without_whitespace(text: &str) -> String {
         text.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    #[test]
+    fn request_signatures_match_the_web_client() {
+        // Vectors checked against the web client's algorithm and live endpoint.
+        for (text, t, sign) in [
+            ("farewell", "5", "f61eede0a490830f097f812c4b7607d0"),
+            ("hello", "2", "3c71569a04e3231adce6ef811c67148a"),
+            (
+                "Redemption code recharge",
+                "1",
+                "b63ae342e0fd0ea56028882bce002c5a",
+            ),
+            ("再见🦀", "1", "a6b3b77fe7f052e94cc358e053ca9adf"),
+        ] {
+            assert_eq!(request_signature(text), (t.into(), sign.into()), "{text}");
+        }
+    }
+
+    #[test]
+    fn chinese_foreign_pairs_select_the_foreign_language_in_both_directions() {
+        for language in ["en", "es", "fr", "de", "ja", "ko", "ru"] {
+            for (from, to, direction) in [
+                (language, "zh-Hans", format!("{language}2zh-CHS")),
+                ("zh-Hans", language, format!("zh-CHS2{language}")),
+            ] {
+                let mut calls = 0;
+                let result = translate_for_languages("source", from, to, |text, le| {
+                    calls += 1;
+                    assert_eq!(le, language);
+                    Ok(json!({"fanyi": {"input": text, "type": direction, "tran": "译文"}}))
+                })
+                .unwrap();
+                assert_eq!(result, ["译文"]);
+                assert_eq!(calls, 1);
+            }
+        }
+        for (from, to) in [
+            ("es", "en"),
+            ("en", "es"),
+            ("zh-Hans", "zh-Hant"),
+            ("it", "zh-Hans"),
+        ] {
+            assert!(matches!(
+                translate_for_languages("source", from, to, |_, _| panic!(
+                    "unsupported pair must not request"
+                )),
+                Err(ServiceError::Unsupported(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn auto_spanish_uses_spanish_and_preserves_explicit_source() {
+        let text =
+            "Cierto, realize una prueba similar y el 3.8 me dió la misma UI que me dió la 3.6";
+        for (from, language) in [("auto", "es"), ("es", "es"), ("en", "en")] {
+            let result = translate_for_languages(text, from, "zh-Hans", |input, le| {
+                assert_eq!(input, text);
+                assert_eq!(le, language);
+                Ok(json!({"fanyi": {
+                    "input": input, "type": format!("{le}2zh-CHS"), "tran": "我做了类似的测试。"
+                }}))
+            })
+            .unwrap();
+            assert_eq!(result, ["我做了类似的测试。"]);
+        }
+    }
+
+    #[test]
+    fn wrong_or_missing_direction_cannot_return_a_successful_translation() {
+        for kind in [
+            json!("en2zh-CHS"),
+            json!("zh-CHS2es"),
+            json!("es2en"),
+            json!(null),
+            json!(42),
+        ] {
+            let result = translate_for_languages("prueba", "es", "zh-Hans", |text, _| {
+                Ok(json!({"fanyi": {"input": text, "type": kind, "tran": "错误译文"}}))
+            });
+            assert!(matches!(result, Err(ServiceError::Parse(_))));
+        }
+        let result = translate_for_languages("prueba", "es", "zh-Hans", |text, _| {
+            Ok(json!({"input": text, "ec": {"word": {"trs": [{"tran": "英语词典释义"}]}}}))
+        });
+        assert!(
+            result.is_err(),
+            "Spanish must not fall back to an English dictionary"
+        );
+    }
+
+    #[test]
+    fn later_chunk_with_wrong_direction_discards_partial_translation() {
+        let text = "Hice una prueba similar y obtuve el mismo resultado. ".repeat(25);
+        let mut calls = 0;
+        let result = translate_for_languages(&text, "auto", "zh-Hans", |chunk, le| {
+            calls += 1;
+            assert_eq!(le, "es");
+            Ok(json!({"fanyi": {
+                "input": chunk, "type": if calls == 1 { "es2zh-CHS" } else { "en2zh-CHS" },
+                "tran": "部分译文"
+            }}))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn unrelated_dictionary_is_rejected_even_with_usable_meanings() {
+        for echo in [
+            json!({"input": "undamaged"}),
+            json!({"meta": {"input": "undamaged"}}),
+        ] {
+            let mut data = echo;
+            data["ec"] = json!({"word": {
+                "return-phrase": "undamaged",
+                "usphone": "ʌnˈdæmɪdʒd",
+                "trs": [{"pos": "adj.", "tran": "未损坏的"}]
+            }});
+            assert!(YoudaoDict::parse_dictionary(&data, "farewell").is_err());
+            assert!(YoudaoDict::parse_dictionary_output(&data, "farewell").is_err());
+            assert!(translate_with_request("farewell", "zh-Hans", |_| Ok(data.clone())).is_err());
+        }
+    }
+
+    #[test]
+    fn matching_query_can_return_a_dictionary_lemma() {
+        let data = json!({
+            "input": "farewells",
+            "ec": {"word": {
+                "return-phrase": "farewell",
+                "trs": [{"pos": "n.", "tran": "告别"}]
+            }}
+        });
+        let output = YoudaoDict::parse_dictionary_output(&data, "farewells").unwrap();
+        assert_eq!(output.dict.unwrap().word, "farewell");
+        assert_eq!(output.paragraphs, ["n. 告别"]);
     }
 
     #[test]
@@ -386,13 +594,15 @@ mod tests {
             "A complete sentence. ".repeat(35),
             "Another sentence. ".repeat(40)
         );
-        let result = translate_with_request(&english, "en", |s| Ok(echo(s))).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0].split_whitespace().collect::<Vec<_>>(),
-            english.split_whitespace().collect::<Vec<_>>()
-        );
-        assert_eq!(result[0].matches('\n').count(), 2);
+        for target in ["en", "es", "fr", "de", "ko", "ru"] {
+            let result = translate_with_request(&english, target, |s| Ok(echo(s))).unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(
+                result[0].split_whitespace().collect::<Vec<_>>(),
+                english.split_whitespace().collect::<Vec<_>>()
+            );
+            assert_eq!(result[0].matches('\n').count(), 2);
+        }
 
         let chinese = "中文长句。".repeat(100);
         let result = translate_with_request(&chinese, "zh-Hans", |s| Ok(echo(s))).unwrap();

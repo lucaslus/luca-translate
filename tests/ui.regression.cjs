@@ -13,7 +13,7 @@ const catalogue = [
     id: "youdao",
     service: "YoudaoDict",
     label: "有道",
-    description: "中英互译",
+    description: "多语种句子翻译 · 英语查词与音标",
     logo: "logos/youdao.png",
   },
   {

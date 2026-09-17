@@ -23,6 +23,105 @@ fn network_youdao_dict_has_phonetics() {
 }
 
 #[test]
+fn network_youdao_farewell_has_dictionary_and_phonetics() {
+    let result =
+        lucas_core::services::dict_route("farewell", "zh-Hans").expect("farewell lookup failed");
+    let card = result.dict.expect("farewell must return a dictionary card");
+    assert_eq!(card.word, "farewell");
+    assert!(card.us_phonetic.is_some() && card.uk_phonetic.is_some());
+    assert!(card.us_speech.is_some() && card.uk_speech.is_some());
+    assert!(card
+        .meanings
+        .iter()
+        .any(|(_, meaning)| meaning.contains("告别")));
+    assert!(result
+        .paragraphs
+        .iter()
+        .any(|meaning| meaning.contains("再见")));
+}
+
+#[test]
+fn network_youdao_preps_has_dictionary_and_phonetics() {
+    let result = lucas_core::services::dict_route("preps", "zh-Hans").expect("preps lookup failed");
+    let card = result.dict.expect("preps must return a dictionary card");
+    assert_eq!(card.word, "preps");
+    assert!(card.us_phonetic.is_some() && card.uk_phonetic.is_some());
+    assert!(card.us_speech.is_some() && card.uk_speech.is_some());
+    assert!(card
+        .meanings
+        .iter()
+        .any(|(_, meaning)| meaning.contains("准备")));
+    assert!(result
+        .paragraphs
+        .iter()
+        .any(|meaning| meaning.contains("prep")));
+}
+
+#[test]
+fn network_youdao_reported_spanish_sentence_translates() {
+    use lucas_core::services::{youdao_dict::YoudaoDict, TranslateService};
+
+    let text = "Cierto, realize una prueba similar y el 3.8 me dió la misma UI que me dió la 3.6";
+    assert_eq!(lang::detect_source(text), "es");
+    for from in ["auto", "es"] {
+        let translated = YoudaoDict
+            .translate(text, from, "zh-Hans")
+            .unwrap()
+            .join("\n");
+        assert!(translated.contains("测试"), "{translated}");
+        assert!(
+            translated.contains("3.8") && translated.contains("3.6"),
+            "{translated}"
+        );
+        assert!(
+            !translated.contains("dió") && !translated.contains("prueba"),
+            "{translated}"
+        );
+    }
+}
+
+#[test]
+fn network_youdao_verified_language_pairs_translate() {
+    use lucas_core::services::{youdao_dict::YoudaoDict, TranslateService};
+
+    let chinese = "我做了类似的测试，得到了相同的结果。";
+    for (language, text) in [
+        ("en", "I did a similar test and got the same result."),
+        ("es", "Hice una prueba similar y obtuve el mismo resultado."),
+        (
+            "fr",
+            "J’ai fait un test similaire et obtenu le même résultat.",
+        ),
+        (
+            "de",
+            "Ich habe einen ähnlichen Test gemacht und das gleiche Ergebnis erhalten.",
+        ),
+        ("ja", "同じようなテストを行い、同じ結果が得られました。"),
+        ("ko", "비슷한 테스트를 했고 같은 결과를 얻었습니다."),
+        ("ru", "Я провёл похожий тест и получил тот же результат."),
+    ] {
+        let translated = YoudaoDict
+            .translate(text, language, "zh-Hans")
+            .unwrap()
+            .join("\n");
+        assert!(
+            translated.contains("测试"),
+            "{language}->zh-Hans: {translated}"
+        );
+        assert_ne!(translated, text);
+
+        // The provider also validates fanyi.type, so a nonempty English reply
+        // cannot silently pass as another requested language.
+        let translated = YoudaoDict
+            .translate(chinese, "zh-Hans", language)
+            .unwrap()
+            .join("\n");
+        assert!(!translated.trim().is_empty());
+        assert_ne!(translated, chinese, "zh-Hans->{language}");
+    }
+}
+
+#[test]
 fn network_youdao_long_translation_keeps_the_final_sentence() {
     use lucas_core::services::{youdao_dict::YoudaoDict, TranslateService};
 
