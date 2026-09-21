@@ -9,7 +9,7 @@
 use md5::{Digest, Md5};
 use serde_json::Value;
 
-use super::{DictCard, DictService, ServiceError, TranslateService};
+use super::{DictCard, DictService, DictionaryHelp, ServiceError, TranslateService};
 
 const API: &str = "https://dict.youdao.com/jsonapi_s?doctype=json&jsonversion=4";
 // Public web client signing key, observed in Youdao's web_dict 3.1.0 client
@@ -24,6 +24,7 @@ pub struct YoudaoDict;
 pub(super) struct DictionaryOutput {
     pub dict: Option<DictCard>,
     pub paragraphs: Vec<String>,
+    pub help: Option<DictionaryHelp>,
 }
 
 impl YoudaoDict {
@@ -55,9 +56,12 @@ impl YoudaoDict {
     }
 
     pub(super) fn lookup_or_translate(&self, text: &str) -> Result<DictionaryOutput, ServiceError> {
-        // Word-like phrases need not have a dictionary entry. Reuse the translation
-        // in the same response instead of failing or issuing a second request.
-        Self::parse_dictionary_output(&self.request(text, "en")?, text)
+        lookup_with_fallback(
+            text,
+            self.request(text, "en"),
+            || super::youdao_translate::translate(text, "en", "zh-Hans"),
+            |lemma| self.lookup(lemma),
+        )
     }
 
     fn parse_dictionary_output(data: &Value, text: &str) -> Result<DictionaryOutput, ServiceError> {
@@ -65,15 +69,97 @@ impl YoudaoDict {
             return Ok(DictionaryOutput {
                 paragraphs: dictionary_paragraphs(&dict),
                 dict: Some(dict),
+                help: None,
             });
         }
         translation_paragraphs(data, text)?
             .map(|paragraphs| DictionaryOutput {
                 dict: None,
                 paragraphs,
+                help: None,
             })
             .ok_or_else(missing_content)
     }
+}
+
+fn has_phonetics(dict: &DictCard) -> bool {
+    [&dict.uk_phonetic, &dict.us_phonetic]
+        .into_iter()
+        .any(|p| p.as_ref().is_some_and(|s| !s.trim().is_empty()))
+}
+
+fn lookup_with_fallback(
+    text: &str,
+    response: Result<Value, ServiceError>,
+    translate: impl FnOnce() -> Result<Vec<String>, ServiceError>,
+    lookup_lemma: impl FnOnce(&str) -> Result<DictCard, ServiceError>,
+) -> Result<DictionaryOutput, ServiceError> {
+    let data = match response {
+        Err(ServiceError::Cancelled) => return Err(ServiceError::Cancelled),
+        Ok(data) if validate_response_input(&data, text).is_ok() => Some(data),
+        _ => None,
+    };
+    let parsed = data
+        .as_ref()
+        .and_then(|d| YoudaoDict::parse_dictionary_output(d, text).ok());
+    if parsed
+        .as_ref()
+        .and_then(|p| p.dict.as_ref())
+        .is_some_and(has_phonetics)
+    {
+        return Ok(parsed.unwrap());
+    }
+    // This is a separate translation endpoint, not a retry of a failed lookup.
+    let paragraphs = match translate() {
+        Ok(p) if p.iter().any(|s| !s.trim().is_empty()) => p,
+        Err(ServiceError::Cancelled) => return Err(ServiceError::Cancelled),
+        result => return parsed.ok_or_else(|| result.err().unwrap_or_else(missing_content)),
+    };
+    let mut help = DictionaryHelp::default();
+    if let Some(data) = data {
+        if let Some(typos) = data.pointer("/typos/typo").and_then(Value::as_array) {
+            for word in typos.iter().filter_map(|v| v["word"].as_str()) {
+                if word != text
+                    && word.len() <= 80
+                    && !word.trim().is_empty()
+                    && !help.suggestions.iter().any(|s| s == word)
+                {
+                    help.suggestions.push(word.into());
+                }
+                if help.suggestions.len() == 3 {
+                    break;
+                }
+            }
+        }
+        // Only an explicit dictionary relationship permits a lemma lookup.
+        // Never guess a lemma by stripping suffixes or choosing a typo suggestion.
+        let lemma = data
+            .pointer("/ec/word/prototype")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                parsed
+                    .as_ref()
+                    .and_then(|p| p.dict.as_ref())
+                    .map(|d| d.word.as_str())
+            })
+            .filter(|word| {
+                !word.eq_ignore_ascii_case(text) && !word.trim().is_empty() && word.len() <= 80
+            });
+        if let Some(lemma) = lemma {
+            match lookup_lemma(lemma) {
+                Ok(card) if card.word.eq_ignore_ascii_case(lemma) && has_phonetics(&card) => {
+                    help.lemma = Some(card)
+                }
+                Err(ServiceError::Cancelled) => return Err(ServiceError::Cancelled),
+                _ => {} // An optional pronunciation lookup must not discard translation.
+            }
+        }
+    }
+    Ok(DictionaryOutput {
+        paragraphs,
+        dict: None,
+        help: (!help.suggestions.is_empty() || help.lemma.is_some()).then_some(help),
+    })
 }
 
 impl DictService for YoudaoDict {
@@ -179,9 +265,15 @@ impl TranslateService for YoudaoDict {
     }
 
     fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
-        translate_for_languages(text, from, to, |chunk, language| {
+        let source = crate::lang::source_hint(text, from);
+        query_language(source, to)?;
+        match translate_for_languages(text, from, to, |chunk, language| {
             self.request(chunk, language)
-        })
+        }) {
+            Ok(result) => Ok(result),
+            Err(ServiceError::Cancelled) => Err(ServiceError::Cancelled),
+            Err(_) => super::youdao_translate::translate(text, source, to),
+        }
     }
 }
 
@@ -379,6 +471,89 @@ fn translation_paragraphs(data: &Value, text: &str) -> Result<Option<Vec<String>
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn typo_suggestions_never_replace_input_or_trigger_lemma_lookup() {
+        let output = lookup_with_fallback("abliterated", Ok(json!({
+            "input": "abliterated", "typos": {"typo": [{"word": "obliterated"}, {"word": "obliterate"}]}
+        })), || Ok(vec!["被抹除".into()]), |_| panic!("suggestions are not lemmas")).unwrap();
+        assert_eq!(output.paragraphs, ["被抹除"]);
+        assert!(output.dict.is_none());
+        let help = output.help.unwrap();
+        assert_eq!(help.suggestions, ["obliterated", "obliterate"]);
+        assert!(help.lemma.is_none());
+    }
+
+    #[test]
+    fn dictionary_failure_falls_back_but_cancellation_does_not() {
+        for error in [
+            ServiceError::Timeout,
+            missing_content(),
+            ServiceError::Network(String::new()),
+        ] {
+            let result =
+                lookup_with_fallback("word", Err(error), || Ok(vec!["译文".into()]), |_| panic!())
+                    .unwrap();
+            assert_eq!(result.paragraphs, ["译文"]);
+            assert!(result.help.is_none());
+        }
+        assert!(matches!(
+            lookup_with_fallback(
+                "word",
+                Err(ServiceError::Cancelled),
+                || panic!(),
+                |_| panic!()
+            ),
+            Err(ServiceError::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn missing_phonetics_can_use_an_explicit_lemma_without_replacing_translation() {
+        let data = json!({"input":"walked", "ec":{"word":{
+            "return-phrase":"walked", "prototype":"walk", "trs":[{"tran":"走过"}]
+        }}});
+        let result = lookup_with_fallback(
+            "walked",
+            Ok(data.clone()),
+            || Ok(vec!["走了".into()]),
+            |word| {
+                assert_eq!(word, "walk");
+                YoudaoDict::parse_dictionary(
+                    &json!({"input":"walk", "ec":{"word":{
+                        "return-phrase":"walk", "usphone":"wɔːk", "trs":[{"tran":"走"}]
+                    }}}),
+                    "walk",
+                )
+            },
+        )
+        .unwrap();
+        assert_eq!(result.paragraphs, ["走了"]);
+        assert!(result.dict.is_none());
+        assert_eq!(result.help.unwrap().lemma.unwrap().word, "walk");
+        let result = lookup_with_fallback(
+            "walked",
+            Ok(data),
+            || Ok(vec!["走了".into()]),
+            |_| Err(ServiceError::Timeout),
+        )
+        .unwrap();
+        assert_eq!(result.paragraphs, ["走了"]);
+    }
+
+    #[test]
+    fn dictionary_with_phonetics_does_not_need_translation() {
+        let result = lookup_with_fallback(
+            "hello",
+            Ok(json!({"input":"hello", "ec":{"word":{
+                "return-phrase":"hello", "usphone":"həˈloʊ", "trs":[{"tran":"你好"}]
+            }}})),
+            || panic!(),
+            |_| panic!(),
+        )
+        .unwrap();
+        assert!(result.dict.is_some());
+    }
 
     fn echo(text: &str) -> Value {
         json!({"fanyi": {"input": text, "tran": text}})

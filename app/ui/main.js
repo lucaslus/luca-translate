@@ -268,34 +268,10 @@ function card(r) {
   } else if (r.dict) {
     const d = r.dict;
     body.append(el("h2", { class: "dict-word", text: d.word }));
-    const phonetics = el("div", { class: "phonetics" });
-    for (const [label, value, url] of [
-      ["英", d.uk_phonetic, d.uk_speech],
-      ["美", d.us_phonetic, d.us_speech],
-    ]) {
-      if (!value) continue;
-      const chip = el("span", { class: "ph" }, label + " /" + value + "/");
-      // Only the configured HTTPS voice endpoint may be played.
-      if (url) {
-        try {
-          const u = new URL(url);
-          if (u.protocol === "https:" && u.hostname === "dict.youdao.com") {
-            const play = button(
-              label + "音",
-              () =>
-                new Audio(url)
-                  .play()
-                  .catch(() => toast("发音暂时不可用", true)),
-              false,
-              "volume_up",
-            );
-            play.classList.add("speak");
-            chip.append(play);
-          }
-        } catch (_) {}
-      }
-      phonetics.append(chip);
+    if (d.word.toLowerCase() !== r.text.trim().toLowerCase()) {
+      body.append(el("p", { class: "dict-sub", text: "以下为词典返回的原形词条与音标" }));
     }
+    const phonetics = renderPhonetics(d);
     body.append(
       phonetics,
       el(
@@ -308,6 +284,30 @@ function card(r) {
     );
   } else {
     body.append(...r.paragraphs.map((text) => el("p", { text })));
+  }
+  if (!failed && r.dictionary_help) {
+    const help = r.dictionary_help;
+    if (help.lemma) {
+      body.append(
+        el("p", { class: "dict-sub", text: "原形 " + help.lemma.word + " 的音标（供参考）" }),
+        renderPhonetics(help.lemma),
+      );
+    }
+    if (help.suggestions?.length) {
+      const suggestions = el("div", { class: "dict-suggestions" },
+        el("span", { class: "dict-sub", text: "相近拼写（不是原形）：" }));
+      for (const word of help.suggestions) {
+        const suggestion = button(word, () => {
+          input.value = word;
+          input.dispatchEvent(new window.Event("input", { bubbles: true }));
+          doTranslate();
+        });
+        suggestion.classList.add("ghost");
+        suggestion.setAttribute("aria-label", "查询相近词 " + word);
+        suggestions.append(suggestion);
+      }
+      body.append(suggestions);
+    }
   }
   if (!failed && r.pinyin)
     body.append(
@@ -974,3 +974,35 @@ async function init() {
 }
 window.doTranslate = doTranslate;
 init();
+
+function renderPhonetics(d) {
+  const phonetics = el("div", { class: "phonetics" });
+  for (const [label, value, url] of [
+    ["英", d.uk_phonetic, d.uk_speech],
+    ["美", d.us_phonetic, d.us_speech],
+  ]) {
+    if (!value) continue;
+    const chip = el("span", { class: "ph" }, label + " /" + value + "/");
+    // Only the configured HTTPS voice endpoint may be played.
+    if (url) {
+      try {
+        const u = new URL(url);
+        if (u.protocol === "https:" && u.hostname === "dict.youdao.com") {
+          const play = button(
+            label + "音",
+            () =>
+              new Audio(url)
+                .play()
+                .catch(() => toast("发音暂时不可用", true)),
+            false,
+            "volume_up",
+          );
+          play.classList.add("speak");
+          chip.append(play);
+        }
+      } catch (_) {}
+    }
+    phonetics.append(chip);
+  }
+  return phonetics;
+}

@@ -236,3 +236,14 @@ fn network_bing_free_translate() {
     assert!(!r.paragraphs.join("").is_empty());
     assert_eq!(r.detected_from.as_deref(), Some("en"));
 }
+
+#[test]
+fn network_youdao_unlisted_word_uses_text_translation() {
+    for word in ["abliterated", "abliterate"] {
+        let result = lucas_core::services::dict_route(word, "zh-Hans").unwrap();
+        assert_eq!(result.text, word);
+        assert!(result.dict.is_none(), "must not invent a dictionary entry");
+        assert!(result.paragraphs.iter().any(|p| p.contains("抹") || p.contains("消")), "{:?}", result.paragraphs);
+        assert!(result.dictionary_help.as_ref().is_some_and(|h| !h.suggestions.is_empty() && h.lemma.is_none()));
+    }
+}

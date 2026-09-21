@@ -375,6 +375,32 @@ async function main() {
     check(
       "unknown icons fall back to a single bundled glyph instead of English text",
     );
+    const fallbackId = await start("abliterated", ["YoudaoDict"]);
+    await event(fallbackId, "result", {
+      ...value("被抹除", "YoudaoDict"), text: "abliterated",
+      dictionary_help: { suggestions: ["obliterated", "obliterate"], lemma: null },
+    });
+    await event(fallbackId, "done");
+    assert((await page.locator("#result").innerText()).includes("被抹除"));
+    assert((await page.locator("#result").innerText()).includes("相近拼写（不是原形）"));
+    assert.equal(await page.locator("#result .ph").count(), 0);
+    assert.equal(await page.locator("#input").inputValue(), "abliterated");
+    await assertLayout("translation with spelling suggestions");
+    await page.screenshot({ path: join(output, "youdao-fallback.png") });
+    await page.getByRole("button", { name: "查询相近词 obliterate", exact: true }).click();
+    assert.equal(await page.locator("#input").inputValue(), "obliterate");
+    assert.equal(await page.evaluate(() => __mock.calls.filter(c => c.name === "translate").at(-1).args.text), "obliterate");
+    const lemmaId = await start("walked", ["YoudaoDict"]);
+    await event(lemmaId, "result", {
+      ...value("走了", "YoudaoDict"), text: "walked",
+      dictionary_help: { suggestions: [], lemma: { word: "walk", us_phonetic: "wɔːk", meanings: [["v.", "走"]] } },
+    });
+    await event(lemmaId, "done");
+    assert((await page.locator("#result").innerText()).includes("原形 walk 的音标（供参考）"));
+    assert((await page.locator("#result").innerText()).includes("走了"));
+    assert.equal(await page.locator("#result .ph").count(), 1);
+    check("dictionary fallback preserves translation, labels lemma phonetics and queries spelling suggestions only on click");
+    await fresh();
     let id = await start("autonomous");
     assert.equal(
       await page.locator("#detect-info").textContent(),

@@ -7,6 +7,7 @@ mod error;
 pub mod google_free;
 pub mod openai_compat;
 pub mod youdao_dict;
+mod youdao_translate;
 pub(crate) use error::retry_after;
 pub use error::{ErrorCode, FailureInfo, ServiceError};
 
@@ -30,6 +31,13 @@ pub struct DictCard {
     /// 美式发音 URL
     pub us_speech: Option<String>,
     pub source: String,
+}
+
+/// Optional dictionary aids; suggestions are never treated as verified lemmas.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DictionaryHelp {
+    pub suggestions: Vec<String>,
+    pub lemma: Option<DictCard>,
 }
 
 /// 翻译渠道的原始结果。渠道支持时同时返回它实际检测到的源语言。
@@ -113,7 +121,7 @@ pub fn dict_route(trimmed: &str, to: &str) -> Result<QueryResult, ServiceError> 
     if !matches!(to, "auto" | "zh-Hans") {
         return Err(ServiceError::Unsupported("词典仅提供中文释义".into()));
     }
-    let youdao_dict::DictionaryOutput { dict, paragraphs } =
+    let youdao_dict::DictionaryOutput { dict, paragraphs, help } =
         youdao_dict::YoudaoDict.lookup_or_translate(trimmed)?;
     let detected_to = if to == "auto" {
         lang::auto_target("en")
@@ -135,6 +143,7 @@ pub fn dict_route(trimmed: &str, to: &str) -> Result<QueryResult, ServiceError> 
         source_confirmed: false,
         paragraphs,
         dict,
+        dictionary_help: help,
         pinyin,
         service: "YoudaoDict".into(),
         error: None,
@@ -197,6 +206,7 @@ pub fn route_all(
                         pinyin: pinyin::annotate(&paragraphs.join("\n")),
                         paragraphs,
                         dict: None,
+                        dictionary_help: None,
                         service: svc.name().into(),
                         error: None,
                         failure: None,

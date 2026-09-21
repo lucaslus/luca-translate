@@ -6,7 +6,7 @@
 //!   并在任何结果上附加拼音标注（若包含中文）。
 //!
 //! 音标问题定位（Bob 的痛点）：Bob 只有词典类服务返回音标，普通翻译通道没有。
-//! 我们把词典作为一等公民服务，英文单词输入永远能拿到英/美音标。
+//! 词典有数据时补充英/美音标；没有数据时仍可独立翻译。
 
 pub mod lang;
 pub mod paragraph;
@@ -45,6 +45,8 @@ pub struct QueryResult {
     pub paragraphs: Vec<String>,
     /// 单词词典卡片（音标所在处；句子翻译时为 None）
     pub dict: Option<DictCard>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dictionary_help: Option<services::DictionaryHelp>,
     /// 拼音标注（原文或译文包含中文时存在，带声调，空格分隔音节）
     pub pinyin: Option<String>,
     /// 提供此结果的服务名

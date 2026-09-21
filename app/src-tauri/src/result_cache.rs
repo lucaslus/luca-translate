@@ -92,6 +92,7 @@ mod tests {
             source_confirmed: true,
             paragraphs: vec!["你好".into()],
             dict: None,
+            dictionary_help: None,
             pinyin: None,
             service: "test".into(),
             error: None,
