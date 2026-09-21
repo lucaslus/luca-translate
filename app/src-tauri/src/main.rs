@@ -623,9 +623,13 @@ fn main() {
             hotkeys::initialize(app.handle());
 
             // ---- 系统托盘 ----
-            // 单色 template 图（圆环+两点），macOS 菜单栏深浅色自适应
-            let tray_image =
-                tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?.clone();
+            // 只有 macOS 会按菜单栏主题给 template 图着色。
+            // Linux / Windows 使用彩色图标，避免黑色图案在深色托盘中不可见。
+            #[cfg(target_os = "macos")]
+            let tray_bytes = include_bytes!("../icons/tray.png").as_slice();
+            #[cfg(not(target_os = "macos"))]
+            let tray_bytes = include_bytes!("../icons/128x128.png").as_slice();
+            let tray_image = tauri::image::Image::from_bytes(tray_bytes)?;
             let open = MenuItem::with_id(app, "open", "打开翻译窗口", true, None::<&str>)?;
             let shot = MenuItem::with_id(app, "shot", "截图 OCR", true, None::<&str>)?;
             let silent = MenuItem::with_id(app, "silent", "静默截图 OCR", true, None::<&str>)?;
@@ -634,7 +638,7 @@ fn main() {
             let menu = Menu::with_items(app, &[&open, &shot, &silent, &settings, &quit])?;
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_image)
-                .icon_as_template(true)
+                .icon_as_template(cfg!(target_os = "macos"))
                 .tooltip("Lucas Translate")
                 .menu(&menu)
                 // 托盘点击只打开原生菜单。不要同时绑定鼠标事件唤起窗口，
