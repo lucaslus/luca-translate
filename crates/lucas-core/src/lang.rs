@@ -196,7 +196,7 @@ pub fn normalize_provider_language(code: &str) -> Option<&'static str> {
         "zh" | "zh-cn" | "zh-sg" | "zh-hans" | "zh-chs" => Some("zh-Hans"),
         "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant" | "zh-cht" => Some("zh-Hant"),
         "en" | "en-us" | "en-gb" | "eng" => Some("en"),
-        "ja" | "jp" => Some("ja"),
+        "ja" | "jp" | "jap" => Some("ja"),
         "ko" | "kr" => Some("ko"),
         "fr" => Some("fr"),
         "de" => Some("de"),
@@ -288,6 +288,7 @@ mod tests {
         assert_eq!(normalize_provider_language("EN-US"), Some("en"));
         assert_eq!(normalize_provider_language("ZH_HANT"), Some("zh-Hant"));
         assert_eq!(normalize_provider_language("eng"), Some("en"));
+        assert_eq!(normalize_provider_language("jap"), Some("ja"));
         assert_eq!(normalize_provider_language("zh-CHS"), Some("zh-Hans"));
         assert_eq!(normalize_provider_language("zh-CHT"), Some("zh-Hant"));
         assert_eq!(normalize_provider_language("uk"), None);

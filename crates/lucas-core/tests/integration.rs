@@ -280,6 +280,31 @@ fn network_youdao_source_detection_reaches_results() {
             "es",
         ),
         ("我做了类似的测试，得到了相同的结果。", "en", "zh-Hans"),
+        (
+            "同じようなテストを行い、同じ結果が得られました。",
+            "zh-Hans",
+            "ja",
+        ),
+        (
+            "비슷한 테스트를 했고 같은 결과를 얻었습니다.",
+            "zh-Hans",
+            "ko",
+        ),
+        (
+            "J’ai fait un test similaire et obtenu le même résultat.",
+            "zh-Hans",
+            "fr",
+        ),
+        (
+            "Ich habe einen ähnlichen Test gemacht und das gleiche Ergebnis erhalten.",
+            "zh-Hans",
+            "de",
+        ),
+        (
+            "Я провёл похожий тест и получил тот же результат.",
+            "zh-Hans",
+            "ru",
+        ),
     ] {
         let services: Vec<Box<dyn TranslateService>> = vec![Box::new(YoudaoDict)];
         let results = route_all(&services, text, "auto", to);
