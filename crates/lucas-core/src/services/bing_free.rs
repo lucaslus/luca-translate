@@ -2,7 +2,7 @@
 //!
 //! 流程（逆向 bing-translate-api 公开实现并实测验证）：
 //! 1. GET www.bing.com/translator → 提取 IG / IID / key / token + Set-Cookie
-//! 2. POST www.bing.com/ttranslatev3?isVertical=1&&IG=&IID=&SFX=1
+//! 2. POST 页面重定向后的 Bing 域名 /ttranslatev3?isVertical=1&IG=&IID=&SFX=1
 //!    form: fromLang=auto-detect, text, to, token, key
 //! 注意 fromLang 必须是 "auto-detect"（"auto" 会返回 400）。
 
@@ -18,7 +18,9 @@ const SESSION_TTL: Duration = Duration::from_secs(1800);
 
 pub struct BingFree;
 
+#[derive(Clone)]
 struct BingSession {
+    origin: String,
     ig: String,
     iid: String,
     key: String,
@@ -41,6 +43,10 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
         .timeout(Duration::from_secs(15))
         .set("User-Agent", UA)
         .call()?;
+
+    // A regional 302 on the translation POST drops its form body. Reuse the
+    // origin that served the page, together with its cookies and auth material.
+    let origin = session_origin(resp.url())?;
 
     // 收集 cookie（Set-Cookie 的 name=value 部分）
     let cookie = resp
@@ -75,6 +81,7 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
         return Err(ServiceError::Parse("Bing 参数提取失败".into()));
     }
     Ok(BingSession {
+        origin,
         ig,
         iid,
         key,
@@ -84,28 +91,39 @@ fn fetch_session() -> Result<BingSession, ServiceError> {
     })
 }
 
+fn session_origin(url: &url::Url) -> Result<String, ServiceError> {
+    let host = url.host_str().unwrap_or_default();
+    if url.scheme() != "https"
+        || !(host == "bing.com" || host.ends_with(".bing.com"))
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return Err(ServiceError::Parse("Bing 页面地址异常".into()));
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+fn translation_url(session: &BingSession) -> String {
+    let mut url = url::Url::parse(&format!("{}/ttranslatev3", session.origin))
+        .expect("validated Bing origin");
+    url.query_pairs_mut().extend_pairs([
+        ("isVertical", "1"),
+        ("IG", &session.ig),
+        ("IID", &session.iid),
+        ("SFX", "1"),
+    ]);
+    url.into()
+}
+
 fn get_session() -> Result<BingSession, ServiceError> {
     if let Some(s) = SESSION.lock().unwrap().as_ref() {
         if s.ts.elapsed() < SESSION_TTL {
-            return Ok(BingSession {
-                ig: s.ig.clone(),
-                iid: s.iid.clone(),
-                key: s.key.clone(),
-                token: s.token.clone(),
-                cookie: s.cookie.clone(),
-                ts: s.ts,
-            });
+            return Ok(s.clone());
         }
     }
     let s = fetch_session()?;
-    *SESSION.lock().unwrap() = Some(BingSession {
-        ig: s.ig.clone(),
-        iid: s.iid.clone(),
-        key: s.key.clone(),
-        token: s.token.clone(),
-        cookie: s.cookie.clone(),
-        ts: Instant::now(),
-    });
+    *SESSION.lock().unwrap() = Some(s.clone());
     Ok(s)
 }
 
@@ -130,6 +148,14 @@ fn bing_lang(code: &str) -> Option<String> {
 }
 
 fn parse_translation(data: &Value) -> Result<TranslationOutput, ServiceError> {
+    // Bing also sends failures in an HTTP 200 JSON body. Preserve the status so
+    // the coordinator can apply its normal rate-limit and service cooldowns.
+    if let Some(status @ 400..=599) = data.get("statusCode").and_then(Value::as_u64) {
+        return Err(ServiceError::Http {
+            status: status as u16,
+            retry_after_secs: None,
+        });
+    }
     let text_out = data
         .get(0)
         .and_then(|r| r.get("translations"))
@@ -160,14 +186,11 @@ fn do_translate(text: &str, from: &str, to: &str) -> Result<TranslationOutput, S
             .ok_or_else(|| ServiceError::Unsupported(format!("Bing 不支持源语言 {from}")))?
     };
 
-    let url = format!(
-        "https://www.bing.com/ttranslatev3?isVertical=1&&IG={}&IID={}&SFX=1",
-        session.ig, session.iid
-    );
+    let url = translation_url(&session);
     let resp = crate::http::post(&url)
         .timeout(Duration::from_secs(15))
         .set("User-Agent", UA)
-        .set("Referer", PAGE_URL)
+        .set("Referer", &format!("{}/translator", session.origin))
         .set("Cookie", &session.cookie)
         .send_form(&[
             ("fromLang", source.as_str()),
@@ -176,14 +199,23 @@ fn do_translate(text: &str, from: &str, to: &str) -> Result<TranslationOutput, S
             ("token", session.token.as_str()),
             ("key", session.key.as_str()),
             ("tryFetchingGenderDebiasedTranslations", "true"),
-        ])?;
-    let data: Value = resp.into_json()?;
-
-    match parse_translation(&data) {
+        ]);
+    let output = resp
+        .and_then(|response| response.into_json::<Value>())
+        .and_then(|data| parse_translation(&data));
+    match output {
         Ok(output) => Ok(output),
         Err(error) => {
-            // 会话过期等场景：使缓存失效并提示上层重试
-            invalidate_session();
+            if matches!(
+                error,
+                ServiceError::Parse(_)
+                    | ServiceError::Http {
+                        status: 400..=403,
+                        ..
+                    }
+            ) {
+                invalidate_session();
+            }
             Err(error)
         }
     }
@@ -213,6 +245,56 @@ impl TranslateService for BingFree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_uses_the_resolved_page_origin() {
+        for host in ["www.bing.com", "cn.bing.com"] {
+            let session = BingSession {
+                origin: session_origin(
+                    &url::Url::parse(&format!("https://{host}/translator?mkt=zh-CN")).unwrap(),
+                )
+                .unwrap(),
+                ig: "page-ig".into(),
+                iid: "translator.5023".into(),
+                key: "key".into(),
+                token: "token".into(),
+                cookie: "cookie".into(),
+                ts: Instant::now(),
+            };
+            let url = url::Url::parse(&translation_url(&session.clone())).unwrap();
+            assert_eq!(url.host_str(), Some(host));
+            assert_eq!(url.path(), "/ttranslatev3");
+            assert!(url
+                .query_pairs()
+                .any(|(key, value)| key == "IG" && value == "page-ig"));
+        }
+        for page in [
+            "http://cn.bing.com/translator",
+            "https://bing.com.example.org/translator",
+            "https://notbing.com/translator",
+            "https://user@cn.bing.com/translator",
+            "https://cn.bing.com:8443/translator",
+        ] {
+            assert!(
+                session_origin(&url::Url::parse(page).unwrap()).is_err(),
+                "{page}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_errors_keep_their_status_without_exposing_the_body() {
+        for status in [400, 401, 403, 429, 500, 503] {
+            let error = parse_translation(&serde_json::json!({
+                "statusCode": status, "message": "private response"
+            }))
+            .unwrap_err();
+            assert_eq!(error.info().http_status, Some(status));
+            assert!(!error.to_string().contains("private response"));
+        }
+        assert!(parse_translation(&serde_json::json!([])).is_err());
+        assert!(parse_translation(&serde_json::json!([{"translations":[{"text":" "}]}])).is_err());
+    }
 
     #[test]
     fn response_includes_bing_detected_language() {

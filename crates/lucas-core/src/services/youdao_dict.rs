@@ -9,7 +9,9 @@
 use md5::{Digest, Md5};
 use serde_json::Value;
 
-use super::{DictCard, DictService, DictionaryHelp, ServiceError, TranslateService};
+use super::{
+    DictCard, DictService, DictionaryHelp, ServiceError, TranslateService, TranslationOutput,
+};
 
 const API: &str = "https://dict.youdao.com/jsonapi_s?doctype=json&jsonversion=4";
 // Public web client signing key, observed in Youdao's web_dict 3.1.0 client
@@ -25,6 +27,7 @@ pub(super) struct DictionaryOutput {
     pub dict: Option<DictCard>,
     pub paragraphs: Vec<String>,
     pub help: Option<DictionaryHelp>,
+    pub detected_from: Option<String>,
 }
 
 impl YoudaoDict {
@@ -55,11 +58,15 @@ impl YoudaoDict {
         self.request_once(text, language)
     }
 
-    pub(super) fn lookup_or_translate(&self, text: &str) -> Result<DictionaryOutput, ServiceError> {
+    pub(super) fn lookup_or_translate(
+        &self,
+        text: &str,
+        from: &str,
+    ) -> Result<DictionaryOutput, ServiceError> {
         lookup_with_fallback(
             text,
             self.request(text, "en"),
-            || super::youdao_translate::translate(text, "en", "zh-Hans"),
+            || super::youdao_translate::translate(text, from, "zh-Hans"),
             |lemma| self.lookup(lemma),
         )
     }
@@ -70,6 +77,7 @@ impl YoudaoDict {
                 paragraphs: dictionary_paragraphs(&dict),
                 dict: Some(dict),
                 help: None,
+                detected_from: detected_source(data, text).map(str::to_string),
             });
         }
         translation_paragraphs(data, text)?
@@ -77,6 +85,7 @@ impl YoudaoDict {
                 dict: None,
                 paragraphs,
                 help: None,
+                detected_from: detected_source(data, text).map(str::to_string),
             })
             .ok_or_else(missing_content)
     }
@@ -91,7 +100,7 @@ fn has_phonetics(dict: &DictCard) -> bool {
 fn lookup_with_fallback(
     text: &str,
     response: Result<Value, ServiceError>,
-    translate: impl FnOnce() -> Result<Vec<String>, ServiceError>,
+    translate: impl FnOnce() -> Result<TranslationOutput, ServiceError>,
     lookup_lemma: impl FnOnce(&str) -> Result<DictCard, ServiceError>,
 ) -> Result<DictionaryOutput, ServiceError> {
     let data = match response {
@@ -110,11 +119,16 @@ fn lookup_with_fallback(
         return Ok(parsed.unwrap());
     }
     // This is a separate translation endpoint, not a retry of a failed lookup.
-    let paragraphs = match translate() {
-        Ok(p) if p.iter().any(|s| !s.trim().is_empty()) => p,
+    let output = match translate() {
+        Ok(output) if output.paragraphs.iter().any(|s| !s.trim().is_empty()) => output,
         Err(ServiceError::Cancelled) => return Err(ServiceError::Cancelled),
         result => return parsed.ok_or_else(|| result.err().unwrap_or_else(missing_content)),
     };
+    let detected_from = output.detected_from.or_else(|| {
+        data.as_ref()
+            .and_then(|data| detected_source(data, text))
+            .map(str::to_string)
+    });
     let mut help = DictionaryHelp::default();
     if let Some(data) = data {
         if let Some(typos) = data.pointer("/typos/typo").and_then(Value::as_array) {
@@ -156,9 +170,10 @@ fn lookup_with_fallback(
         }
     }
     Ok(DictionaryOutput {
-        paragraphs,
+        paragraphs: output.paragraphs,
         dict: None,
         help: (!help.suggestions.is_empty() || help.lemma.is_some()).then_some(help),
+        detected_from,
     })
 }
 
@@ -265,6 +280,16 @@ impl TranslateService for YoudaoDict {
     }
 
     fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+        self.translate_with_detection(text, from, to)
+            .map(|output| output.paragraphs)
+    }
+
+    fn translate_with_detection(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<TranslationOutput, ServiceError> {
         let source = crate::lang::source_hint(text, from);
         query_language(source, to)?;
         match translate_for_languages(text, from, to, |chunk, language| {
@@ -272,7 +297,7 @@ impl TranslateService for YoudaoDict {
         }) {
             Ok(result) => Ok(result),
             Err(ServiceError::Cancelled) => Err(ServiceError::Cancelled),
-            Err(_) => super::youdao_translate::translate(text, source, to),
+            Err(_) => super::youdao_translate::translate(text, from, to),
         }
     }
 }
@@ -313,14 +338,41 @@ fn translate_for_languages(
     from: &str,
     to: &str,
     mut request: impl FnMut(&str, &str) -> Result<Value, ServiceError>,
-) -> Result<Vec<String>, ServiceError> {
+) -> Result<TranslationOutput, ServiceError> {
     let source = crate::lang::source_hint(text, from);
     let language = query_language(source, to)?;
-    translate_with_request(text, to, |chunk| {
+    let mut detected_from = None;
+    let mut all_confirmed = true;
+    let paragraphs = translate_with_request(text, to, |chunk| {
         let data = request(chunk, language)?;
         validate_translation_language(&data, source, to)?;
+        let detected = detected_source(&data, chunk);
+        if from == "auto" && detected.is_some_and(|detected| detected != source) {
+            return Err(ServiceError::Parse("有道检测语言与翻译语向不一致".into()));
+        }
+        all_confirmed &=
+            detected.is_some() && (detected_from.is_none() || detected_from == detected);
+        detected_from = detected;
         Ok(data)
+    })?;
+    Ok(TranslationOutput {
+        paragraphs,
+        detected_from: if from == "auto" && all_confirmed {
+            detected_from.map(str::to_string)
+        } else {
+            None
+        },
     })
+}
+
+fn detected_source(data: &Value, text: &str) -> Option<&'static str> {
+    // `le` and `lang` select the dictionary, even for Chinese input. Only
+    // guessLanguage describes the source, and its echoed input must match.
+    response_input(data)?;
+    validate_response_input(data, text).ok()?;
+    data.pointer("/meta/guessLanguage")
+        .and_then(Value::as_str)
+        .and_then(crate::lang::normalize_provider_language)
 }
 
 // Keep requests sequential: the HTTP layer retains the calling thread's
@@ -473,10 +525,101 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn detection_uses_verified_source_metadata_not_dictionary_selection() {
+        let chinese =
+            json!({"meta": {"input": "你好", "guessLanguage": "zh"}, "le": "en", "lang": "eng"});
+        assert_eq!(detected_source(&chinese, "你好"), Some("zh-Hans"));
+        assert_eq!(detected_source(&chinese, "再见"), None);
+        for data in [
+            json!({"input": "hello", "le": "en", "lang": "eng"}),
+            json!({"meta": {"guessLanguage": "eng"}}),
+            json!({"meta": {"input": "hello", "guessLanguage": "unknown"}}),
+        ] {
+            assert_eq!(detected_source(&data, "hello"), None);
+        }
+    }
+
+    #[test]
+    fn dictionary_and_translation_fallback_preserve_provider_detection() {
+        let data = json!({"meta": {"input": "hello", "guessLanguage": "eng"}, "ec": {"word": {
+            "return-phrase": "hello", "usphone": "həˈloʊ", "trs": [{"tran": "你好"}]
+        }}});
+        let output = lookup_with_fallback("hello", Ok(data), || panic!(), |_| panic!()).unwrap();
+        assert_eq!(output.detected_from.as_deref(), Some("en"));
+        assert!(output.dict.is_some());
+
+        let output = lookup_with_fallback(
+            "bonjour",
+            Err(missing_content()),
+            || {
+                Ok(TranslationOutput {
+                    paragraphs: vec!["你好".into()],
+                    detected_from: Some("fr".into()),
+                })
+            },
+            |_| panic!(),
+        )
+        .unwrap();
+        assert_eq!(output.detected_from.as_deref(), Some("fr"));
+        assert_eq!(output.paragraphs, ["你好"]);
+
+        let output = lookup_with_fallback(
+            "walked",
+            Ok(json!({"meta": {"input": "walked", "guessLanguage": "eng"}})),
+            || Ok(TranslationOutput::paragraphs(vec!["走了".into()])),
+            |_| panic!(),
+        )
+        .unwrap();
+        assert_eq!(output.detected_from.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn sentence_detection_survives_chunking_without_guessing_missing_languages() {
+        let text = "This sentence must be fully translated. ".repeat(30);
+        for missing in [false, true] {
+            let mut calls = 0;
+            let output = translate_for_languages(&text, "auto", "zh-Hans", |chunk, _| {
+                calls += 1;
+                Ok(json!({
+                    "meta": {"input": chunk, "guessLanguage": if missing && calls == 1 { None } else { Some("eng") }},
+                    "fanyi": {"input": chunk, "type": "en2zh-CHS", "tran": "译文"}
+                }))
+            }).unwrap();
+            assert!(calls > 1);
+            assert_eq!(
+                output.detected_from.as_deref(),
+                if missing { None } else { Some("en") }
+            );
+        }
+        let output = translate_for_languages("hello", "en", "zh-Hans", |chunk, _| {
+            Ok(json!({
+                "meta": {"input": chunk, "guessLanguage": "eng"},
+                "fanyi": {"input": chunk, "type": "en2zh-CHS", "tran": "你好"}
+            }))
+        })
+        .unwrap();
+        assert_eq!(output.detected_from, None);
+    }
+
+    #[test]
+    fn automatic_dictionary_direction_must_match_detected_language() {
+        let output = translate_for_languages("bonjour", "auto", "zh-Hans", |chunk, _| {
+            Ok(json!({
+                "meta": {"input": chunk, "guessLanguage": "fr"},
+                "fanyi": {"input": chunk, "type": "en2zh-CHS", "tran": "你好"}
+            }))
+        });
+        assert!(
+            output.is_err(),
+            "a wrong local source hint must use automatic text translation"
+        );
+    }
+
+    #[test]
     fn typo_suggestions_never_replace_input_or_trigger_lemma_lookup() {
         let output = lookup_with_fallback("abliterated", Ok(json!({
             "input": "abliterated", "typos": {"typo": [{"word": "obliterated"}, {"word": "obliterate"}]}
-        })), || Ok(vec!["被抹除".into()]), |_| panic!("suggestions are not lemmas")).unwrap();
+        })), || Ok(TranslationOutput::paragraphs(vec!["被抹除".into()])), |_| panic!("suggestions are not lemmas")).unwrap();
         assert_eq!(output.paragraphs, ["被抹除"]);
         assert!(output.dict.is_none());
         let help = output.help.unwrap();
@@ -491,9 +634,13 @@ mod tests {
             missing_content(),
             ServiceError::Network(String::new()),
         ] {
-            let result =
-                lookup_with_fallback("word", Err(error), || Ok(vec!["译文".into()]), |_| panic!())
-                    .unwrap();
+            let result = lookup_with_fallback(
+                "word",
+                Err(error),
+                || Ok(TranslationOutput::paragraphs(vec!["译文".into()])),
+                |_| panic!(),
+            )
+            .unwrap();
             assert_eq!(result.paragraphs, ["译文"]);
             assert!(result.help.is_none());
         }
@@ -516,7 +663,7 @@ mod tests {
         let result = lookup_with_fallback(
             "walked",
             Ok(data.clone()),
-            || Ok(vec!["走了".into()]),
+            || Ok(TranslationOutput::paragraphs(vec!["走了".into()])),
             |word| {
                 assert_eq!(word, "walk");
                 YoudaoDict::parse_dictionary(
@@ -534,7 +681,7 @@ mod tests {
         let result = lookup_with_fallback(
             "walked",
             Ok(data),
-            || Ok(vec!["走了".into()]),
+            || Ok(TranslationOutput::paragraphs(vec!["走了".into()])),
             |_| Err(ServiceError::Timeout),
         )
         .unwrap();
@@ -594,7 +741,7 @@ mod tests {
                     Ok(json!({"fanyi": {"input": text, "type": direction, "tran": "译文"}}))
                 })
                 .unwrap();
-                assert_eq!(result, ["译文"]);
+                assert_eq!(result.paragraphs, ["译文"]);
                 assert_eq!(calls, 1);
             }
         }
@@ -626,7 +773,7 @@ mod tests {
                 }}))
             })
             .unwrap();
-            assert_eq!(result, ["我做了类似的测试。"]);
+            assert_eq!(result.paragraphs, ["我做了类似的测试。"]);
         }
     }
 

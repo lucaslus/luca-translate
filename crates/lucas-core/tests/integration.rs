@@ -26,6 +26,8 @@ fn network_youdao_dict_has_phonetics() {
 fn network_youdao_farewell_has_dictionary_and_phonetics() {
     let result =
         lucas_core::services::dict_route("farewell", "zh-Hans").expect("farewell lookup failed");
+    assert!(result.source_confirmed);
+    assert_eq!(result.detected_from, "en");
     let card = result.dict.expect("farewell must return a dictionary card");
     assert_eq!(card.word, "farewell");
     assert!(card.us_phonetic.is_some() && card.uk_phonetic.is_some());
@@ -43,6 +45,8 @@ fn network_youdao_farewell_has_dictionary_and_phonetics() {
 #[test]
 fn network_youdao_preps_has_dictionary_and_phonetics() {
     let result = lucas_core::services::dict_route("preps", "zh-Hans").expect("preps lookup failed");
+    assert!(result.source_confirmed);
+    assert_eq!(result.detected_from, "en");
     let card = result.dict.expect("preps must return a dictionary card");
     assert_eq!(card.word, "preps");
     assert!(card.us_phonetic.is_some() && card.uk_phonetic.is_some());
@@ -242,8 +246,52 @@ fn network_youdao_unlisted_word_uses_text_translation() {
     for word in ["abliterated", "abliterate"] {
         let result = lucas_core::services::dict_route(word, "zh-Hans").unwrap();
         assert_eq!(result.text, word);
+        assert!(result.source_confirmed);
+        assert_eq!(result.detected_from, "en");
         assert!(result.dict.is_none(), "must not invent a dictionary entry");
-        assert!(result.paragraphs.iter().any(|p| p.contains("抹") || p.contains("消")), "{:?}", result.paragraphs);
-        assert!(result.dictionary_help.as_ref().is_some_and(|h| !h.suggestions.is_empty() && h.lemma.is_none()));
+        assert!(
+            result
+                .paragraphs
+                .iter()
+                .any(|p| p.contains("抹") || p.contains("消")),
+            "{:?}",
+            result.paragraphs
+        );
+        assert!(result
+            .dictionary_help
+            .as_ref()
+            .is_some_and(|h| !h.suggestions.is_empty() && h.lemma.is_none()));
     }
+}
+
+#[test]
+fn network_youdao_source_detection_reaches_results() {
+    use lucas_core::services::{route_all, youdao_dict::YoudaoDict, TranslateService};
+    for (text, to, language) in [
+        ("hello", "zh-Hans", "en"),
+        (
+            "I did a similar test and got the same result.",
+            "zh-Hans",
+            "en",
+        ),
+        (
+            "Hice una prueba similar y obtuve el mismo resultado.",
+            "zh-Hans",
+            "es",
+        ),
+        ("我做了类似的测试，得到了相同的结果。", "en", "zh-Hans"),
+    ] {
+        let services: Vec<Box<dyn TranslateService>> = vec![Box::new(YoudaoDict)];
+        let results = route_all(&services, text, "auto", to);
+        assert_eq!(results.len(), 1, "{text}");
+        assert!(results[0].source_confirmed, "{text}");
+        assert_eq!(results[0].detected_from, language);
+        assert!(!results[0].paragraphs.is_empty());
+    }
+    let result = lucas_core::services::dict_route_with_source("hello", "en", "zh-Hans").unwrap();
+    assert_eq!(result.detected_from, "en");
+    assert!(
+        !result.source_confirmed,
+        "manual language is not auto detection"
+    );
 }

@@ -118,11 +118,31 @@ pub fn route(text: &str, from: &str, to: &str) -> Result<QueryResult, ServiceErr
 
 /// 英文查词（中文释义、可用时返回音标）—— 供应用层流式调用。
 pub fn dict_route(trimmed: &str, to: &str) -> Result<QueryResult, ServiceError> {
+    dict_route_with_source(trimmed, "auto", to)
+}
+
+/// Preserve manual language selection when a dictionary miss needs translation.
+pub fn dict_route_with_source(
+    trimmed: &str,
+    from: &str,
+    to: &str,
+) -> Result<QueryResult, ServiceError> {
     if !matches!(to, "auto" | "zh-Hans") {
         return Err(ServiceError::Unsupported("词典仅提供中文释义".into()));
     }
-    let youdao_dict::DictionaryOutput { dict, paragraphs, help } =
-        youdao_dict::YoudaoDict.lookup_or_translate(trimmed)?;
+    let youdao_dict::DictionaryOutput {
+        dict,
+        paragraphs,
+        help,
+        detected_from,
+    } = youdao_dict::YoudaoDict.lookup_or_translate(trimmed, from)?;
+    let provider_source = if from == "auto" {
+        detected_from
+            .as_deref()
+            .and_then(lang::normalize_provider_language)
+    } else {
+        None
+    };
     let detected_to = if to == "auto" {
         lang::auto_target("en")
     } else {
@@ -136,11 +156,9 @@ pub fn dict_route(trimmed: &str, to: &str) -> Result<QueryResult, ServiceError> 
     };
     Ok(QueryResult {
         text: trimmed.to_string(),
-        detected_from: "en".into(),
+        detected_from: provider_source.unwrap_or("en").into(),
         detected_to: detected_to.to_string(),
-        // A successful dictionary lookup is useful evidence, but short words can
-        // exist in multiple languages; only an auto-detecting provider confirms.
-        source_confirmed: false,
+        source_confirmed: provider_source.is_some(),
         paragraphs,
         dict,
         dictionary_help: help,
@@ -183,7 +201,7 @@ pub fn route_all(
                     if svc.name() == "YoudaoDict"
                         && lang::dictionary_eligible(trimmed, from, target)
                     {
-                        return dict_route(trimmed, target).ok();
+                        return dict_route_with_source(trimmed, from, target).ok();
                     }
                     let output = svc.translate_with_detection(trimmed, from, target).ok()?;
                     let paragraphs = output.paragraphs;

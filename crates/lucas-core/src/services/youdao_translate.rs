@@ -1,6 +1,6 @@
 //! Youdao's text-translation web channel, independent of dictionary coverage.
 //! Protocol checked against the public 1.0.7 web client on 2026-09-20.
-use super::ServiceError;
+use super::{ServiceError, TranslationOutput};
 use md5::{Digest, Md5};
 use serde_json::Value;
 use std::{
@@ -92,7 +92,11 @@ fn encode_input(text: &str) -> String {
     }
     out
 }
-pub(super) fn translate(text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+pub(super) fn translate(
+    text: &str,
+    from: &str,
+    to: &str,
+) -> Result<TranslationOutput, ServiceError> {
     if text.trim().is_empty() || text.encode_utf16().count() > 5000 {
         return Err(ServiceError::Unsupported(
             "有道网页翻译单次支持 1–5000 字符".into(),
@@ -149,12 +153,15 @@ pub(super) fn translate(text: &str, from: &str, to: &str) -> Result<Vec<String>,
     parse_stream(&body, &format!("{}2{}", language(from), language(to)))
 }
 
-fn parse_stream(body: &str, expected: &str) -> Result<Vec<String>, ServiceError> {
+fn parse_stream(body: &str, expected: &str) -> Result<TranslationOutput, ServiceError> {
+    let (source, target) = expected.split_once('2').ok_or_else(invalid)?;
     let normalized = body.replace("\r\n", "\n");
     let mut begun = false;
     let mut ended = false;
     let mut result = String::new();
     let mut request_id = String::new();
+    let mut direction = String::new();
+    let mut detected_from = None;
     for block in normalized.split("\n\n") {
         let mut event = "";
         let mut data = Vec::new();
@@ -172,8 +179,18 @@ fn parse_stream(body: &str, expected: &str) -> Result<Vec<String>, ServiceError>
         let value: Value = serde_json::from_str(&data.join("\n")).map_err(|_| invalid())?;
         match event {
             "begin" if !begun && !ended => {
-                if value["type"].as_str() != Some(expected) {
+                let actual = value["type"].as_str().ok_or_else(invalid)?;
+                let (actual_source, actual_target) = actual.split_once('2').ok_or_else(invalid)?;
+                let language =
+                    crate::lang::normalize_provider_language(actual_source).ok_or_else(invalid)?;
+                if actual_target != target || (source != "auto" && actual_source != source) {
                     return Err(invalid());
+                }
+                direction = actual.into();
+                // Only an automatic request lets the service confirm the source;
+                // a manually supplied language can merely be echoed back.
+                if source == "auto" {
+                    detected_from = Some(language.into());
                 }
                 request_id = value["requestId"]
                     .as_str()
@@ -186,7 +203,7 @@ fn parse_stream(body: &str, expected: &str) -> Result<Vec<String>, ServiceError>
                 result.push_str(value["transIncre"].as_str().ok_or_else(invalid)?)
             }
             "end" if begun && !ended => {
-                if value["type"].as_str() != Some(expected)
+                if value["type"].as_str() != Some(direction.as_str())
                     || value["requestId"].as_str() != Some(&request_id)
                 {
                     return Err(invalid());
@@ -199,7 +216,10 @@ fn parse_stream(body: &str, expected: &str) -> Result<Vec<String>, ServiceError>
     if !ended || result.trim().is_empty() {
         return Err(invalid());
     }
-    Ok(vec![result])
+    Ok(TranslationOutput {
+        paragraphs: vec![result],
+        detected_from,
+    })
 }
 
 #[cfg(test)]
@@ -211,15 +231,47 @@ mod tests {
     #[test]
     fn complete_stream_required() {
         let s = stream();
-        assert_eq!(parse_stream(&s, "en2zh-CHS").unwrap(), ["被抹除"]);
         assert_eq!(
-            parse_stream(&s.replace('\n', "\r\n"), "en2zh-CHS").unwrap(),
+            parse_stream(&s, "en2zh-CHS").unwrap().paragraphs,
+            ["被抹除"]
+        );
+        assert_eq!(
+            parse_stream(&s.replace('\n', "\r\n"), "en2zh-CHS")
+                .unwrap()
+                .paragraphs,
             ["被抹除"]
         );
         assert!(parse_stream(s.split("event:end").next().unwrap(), "en2zh-CHS").is_err());
         assert!(parse_stream(&s, "en2ja").is_err());
         assert!(parse_stream(&s.replace("event:end", "event:error"), "en2zh-CHS").is_err());
         assert!(parse_stream(&s.replace("被抹除", ""), "en2zh-CHS").is_err());
+    }
+    #[test]
+    fn automatic_stream_uses_the_actual_language_and_checks_the_end() {
+        for (provider, language) in [("en", "en"), ("fr", "fr"), ("zh-CHS", "zh-Hans")] {
+            let s = stream().replace("en2zh-CHS", &format!("{provider}2zh-CHS"));
+            let output = parse_stream(&s, "auto2zh-CHS").unwrap();
+            assert_eq!(output.detected_from.as_deref(), Some(language));
+            assert_eq!(output.paragraphs, ["被抹除"]);
+        }
+        assert_eq!(
+            parse_stream(&stream(), "en2zh-CHS").unwrap().detected_from,
+            None
+        );
+        for body in [
+            stream().replace("en2zh-CHS", "auto2zh-CHS"),
+            stream().replace("en2zh-CHS", "en2ja"),
+            stream().replace(
+                "event:end\ndata:{\"requestId\":\"1\",\"type\":\"en2zh-CHS\"}",
+                "event:end\ndata:{\"requestId\":\"1\",\"type\":\"fr2zh-CHS\"}",
+            ),
+            stream().replace(
+                "event:end\ndata:{\"requestId\":\"1\"",
+                "event:end\ndata:{\"requestId\":\"other\"",
+            ),
+        ] {
+            assert!(parse_stream(&body, "auto2zh-CHS").is_err());
+        }
     }
     #[test]
     fn input_is_encoded_without_changing_the_original() {

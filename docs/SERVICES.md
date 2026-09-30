@@ -40,6 +40,8 @@
 
 **桌面端并行返回**：只请求已启用的渠道，失败仅影响该卡片，不自动重复发送或切换付费服务。共享 HTTP 连接池，取消会终止网络等待；成功结果按文本、语向、服务和配置隔离，内存缓存有效期 5 分钟，上限 128 条 / 约 2 MiB 载荷，不缓存失败。429 等可重试错误采用按渠道冷却，避免重试风暴。
 
+2026-09-30 实测修复：Bing 的 `www.bing.com/translator` 在本机网络重定向到 `cn.bing.com`，继续向 `www` 提交翻译会在重定向后收到 HTTP 200 空正文；现在缓存页面最终的 HTTPS Bing 域名，与会话参数一起用于翻译请求和 Referer，并保留 JSON 错误中的状态码以触发现有冷却逻辑；同类行为可交叉参考 [Readest 的地区域名修复](https://github.com/readest/readest/pull/5826)及 [bing-translate-api 的域名处理](https://github.com/plainheart/bing-translate-api/blob/master/src/index.js)。有道源语言采用原文校验通过后的 `meta.guessLanguage`（`eng` 归一化为 `en`），不使用表示词典选择的 `le` / `lang`；词典缺词后使用自动文本翻译时，从完整 SSE 的实际语向提取源语言，同时校验结束事件的语向、目标语言和请求 ID；查词、句子与分段翻译会将有效检测结果传给界面，避免成功后仍显示“待确认”，手动源语言保持用户选择；检测信息缺失或分段检测不完整时仍不宣称已经确认。上述变更需重新构建并重启应用后生效。
+
 DeepL 官方连接测试仅调用 [`GET /v2/usage`](https://developers.deepl.com/api-reference/usage-and-quota/check-usage-and-limits)，不发送用户文字。官方 API 的额度与 SLA 由服务商和账户方案决定，并非无限免费或绝对可靠。
 
 ### 第二梯队（规划，免密钥/自建）

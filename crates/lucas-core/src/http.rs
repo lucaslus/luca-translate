@@ -44,6 +44,7 @@ fn client() -> &'static reqwest::Client {
 
 pub struct Request(reqwest::RequestBuilder, Duration);
 pub struct Response {
+    url: reqwest::Url,
     headers: reqwest::header::HeaderMap,
     body: Vec<u8>,
 }
@@ -74,6 +75,9 @@ impl Request {
     }
 }
 impl Response {
+    pub fn url(&self) -> &reqwest::Url {
+        &self.url
+    }
     pub fn all(&self, key: &str) -> Vec<&str> {
         self.headers
             .get_all(key)
@@ -122,13 +126,14 @@ fn execute(request: reqwest::RequestBuilder, timeout: Duration) -> Result<Respon
                 if response.content_length().is_some_and(|n| n > MAX_BODY as u64) {
                     return Err(ServiceError::Parse("响应过大".into()));
                 }
+                let url = response.url().clone();
                 let headers = response.headers().clone();
                 let mut body = Vec::new();
                 while let Some(chunk) = response.chunk().await.map_err(network_error)? {
                     if body.len() + chunk.len() > MAX_BODY { return Err(ServiceError::Parse("响应过大".into())); }
                     body.extend_from_slice(&chunk);
                 }
-                Ok(Response { headers, body })
+                Ok(Response { url, headers, body })
             }) => result.unwrap_or(Err(ServiceError::Timeout)),
         }
     })
@@ -138,6 +143,30 @@ fn execute(request: reqwest::RequestBuilder, timeout: Duration) -> Result<Respon
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+    #[test]
+    fn response_retains_the_final_url_after_a_redirect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for response in [
+                "HTTP/1.1 302 Found\r\nLocation: /regional/translator\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 4\r\n\r\npage",
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let mut buffer = [0; 4096];
+                stream.read(&mut buffer).unwrap();
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        let response = get(&format!("http://{address}/translator")).call().unwrap();
+        assert_eq!(
+            response.url().as_str(),
+            format!("http://{address}/regional/translator")
+        );
+        assert_eq!(response.into_string().unwrap(), "page");
+        server.join().unwrap();
+    }
     #[test]
     fn cancelled_request_finishes_before_provider_deadline() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

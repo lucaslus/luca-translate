@@ -298,7 +298,7 @@ fn query(
     to: &str,
 ) -> QueryResult {
     if service.name() == "YoudaoDict" && lucas_core::lang::dictionary_eligible(text, from, to) {
-        return lucas_core::services::dict_route(text, to)
+        return lucas_core::services::dict_route_with_source(text, from, to)
             .and_then(|result| {
                 if result.paragraphs.iter().any(|p| !p.trim().is_empty()) {
                     Ok(result)

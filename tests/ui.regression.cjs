@@ -427,6 +427,23 @@ async function main() {
     await event(id, "done");
     check("short text stays unknown until a provider confirms its language");
     await fresh();
+    id = await start("hello", ["YoudaoDict"]);
+    await event(id, "result", {
+      ...value("你好", "YoudaoDict"),
+      detected_from: "en",
+      source_confirmed: true,
+    });
+    await event(id, "done");
+    assert.equal(
+      await page.locator("#detect-info").textContent(),
+      "检测：英语 · 译至 简体中文",
+    );
+    assert.equal(
+      await page.locator(".svc .lang-info").textContent(),
+      "英语 → 简体中文",
+    );
+    check("Youdao alone confirms the source in both the status and result card");
+    await fresh();
     await page.locator("#from-lang").selectOption("en");
     id = await start("manual source");
     await event(id, "result", {
