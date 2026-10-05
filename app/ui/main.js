@@ -887,6 +887,13 @@ async function init() {
         if (!$("svc-pop").hidden) refreshServices();
       }),
       listen("lucas://focus-input", () => input.focus()),
+      listen("lucas://new-input", () => {
+        cancelWork(true);
+        if (!panel.classList.contains("hidden")) closePanel();
+        closeServices();
+        input.value = "";
+        input.focus();
+      }),
       listen("lucas://translate-text", (e) => {
         input.value = e.payload;
         doTranslate();

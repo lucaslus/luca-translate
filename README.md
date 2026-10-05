@@ -11,6 +11,8 @@
 
 面向 macOS、Windows 和 Linux 的**开源 Bob Translate 平替**。划词翻译、截图 OCR、AI 翻译和查词，一个桌面工具完成。基于 Rust + Tauri 2 构建。
 
+**Omarchy 原生版本**：独立的 QML Shell 插件与 Rust 后端，翻译、设置、历史、收藏及截图标注整体跟随 Omarchy 主题，不提供应用内 Dark / Light。源码安装、构建和验证见 [原生插件说明](omarchy/README.md)。macOS、Windows 和普通 Linux 继续使用现有 Tauri 版本。
+
 - **翻译对照**：划词、输入、截图翻译，多渠道并行，失败可单独重试。
 - **截图取字**：本地离线 OCR，静默模式直接复制文字，不弹翻译窗口。
 - **自由选服务**：有道、DeepL、Bing、Google，支持 DeepL 官方 API、OpenAI 兼容服务和本地 Ollama。
@@ -63,10 +65,11 @@ lucas-translate-setup-omarchy
 
 第二条命令以当前桌面用户运行，**不要加 sudo**。安装器检查快捷键冲突、备份个人配置并验证重载；发现占用时退出，不覆盖系统绑定。pacman 安装阶段不修改桌面配置，自动配置在当前用户首次启动应用时完成。
 
-Run the setup command **without sudo**. It checks shortcut conflicts, backs up your configuration, and validates the reload. Occupied shortcuts are not replaced. Desktop configuration is applied on the first app launch as the desktop user, not by pacman.
+Run the setup command **without sudo**. It checks shortcut conflicts, backs up your configuration, and validates the reload. Occupied shortcuts remain unassigned and are flagged in Settings; other bindings are installed normally. Desktop configuration is applied on the first app launch as the desktop user, not by pacman.
 
 | Omarchy 快捷键 / Shortcut | 功能 / Action |
 | --- | --- |
+| `Super+Ctrl+Shift+I` | 空白输入并聚焦 / Start a new input translation |
 | `Super+Ctrl+Shift+T` | 唤起并聚焦；已聚焦时隐藏 / Show and focus; hide when focused |
 | `Super+Ctrl+Shift+D` | 划词翻译 / Translate selected text |
 | `Super+Ctrl+Shift+S` | 框选截图翻译 / Translate a screenshot region |
@@ -78,10 +81,10 @@ Run the setup command **without sudo**. It checks shortcut conflicts, backs up y
 - 默认 **420×650 居中浮窗**，可拖动和调整尺寸；应用未运行时快捷键会启动它。
 - **失焦不会自动隐藏**，避免 Wayland 聚焦时序导致划词结果闪现消失。点击浮窗外部、按 Esc 或聚焦时再次按切换键隐藏；托盘菜单“退出”才会结束进程。
 - **截图标注**仅在 Omarchy 提供：先隐藏翻译面板，框选后立即打开基于 Tensaku 的专用截图编辑器，可圈画、画箭头、添加文字；编辑完成点击 **✔**（或使用复制快捷键）复制并关闭编辑窗口；点击 **×**、按 Esc 或点击窗口外部直接丢弃，再粘贴到其他应用。框选时 Esc 取消，翻译程序未运行时也可用。截图仅使用临时文件，编辑器退出后自动清理；不保存到图片目录、不提示保存位置，编辑确认前不修改剪贴板。
-- 快捷键由 Hyprland 管理；修改应用内的 Alt/Option 快捷键不会改变上述绑定。
+- 六个桌面快捷键可在设置中修改；自动检测占用，冲突项留空并提示重新设置，保存后立即生效。
 - 划词通过 `wl-paste` 读取 PRIMARY 选区；部分应用不支持它，需要手动复制并粘贴。截图通过 `slurp` / `grim`，OCR 在本地执行。
 
-The panel floats centered at **420×650** and can be moved or resized. It explicitly requests compositor focus and **stays visible when focus changes**. The native title bar and pin control are hidden, with Settings available in the bottom bar. Clicking outside, Escape, or toggling the focused panel hides it without quitting; use the tray menu to exit. Hyprland owns these shortcuts. Selection capture requires the source application to expose a PRIMARY selection; otherwise copy and paste manually. Region capture uses `slurp` / `grim` with local OCR.
+The panel floats centered at **420×650** and can be moved or resized. It explicitly requests compositor focus and **stays visible when focus changes**. The native title bar and pin control are hidden, with Settings available in the bottom bar. Clicking outside, Escape, or toggling the focused panel hides it without quitting; use the tray menu to exit. Edit all six desktop shortcuts in Settings. Occupied combinations remain unassigned with a conflict message; valid changes apply immediately. Selection capture requires the source application to expose a PRIMARY selection; otherwise copy and paste manually. Region capture uses `slurp` / `grim` with local OCR.
 
 配置位置、命令接口和卸载集成方法见 [Omarchy 集成说明 / Integration guide](docs/OMARCHY.md)。
 

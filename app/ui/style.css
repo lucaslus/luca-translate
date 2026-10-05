@@ -59,6 +59,7 @@
 
 /* Light —— 纸 */
 html[data-theme="light"], html:not([data-theme]) {
+  color-scheme: light;
   --bg: #ffffff;
   --bg-sunken: #f6f6f4;
   --bg-hover: #f0efec;
@@ -78,6 +79,7 @@ html[data-theme="light"], html:not([data-theme]) {
 
 /* Dark —— 墨 */
 html[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #1c1c1e;
   --bg-sunken: #26262a;
   --bg-hover: #2e2e33;

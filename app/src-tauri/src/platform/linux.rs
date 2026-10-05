@@ -146,6 +146,14 @@ pub(crate) fn bounded_output(
     command: &mut Command,
     timeout: Duration,
 ) -> Result<std::process::Output, String> {
+    bounded_output_while(command, timeout, || true)
+}
+
+pub(crate) fn bounded_output_while(
+    command: &mut Command,
+    timeout: Duration,
+    active: impl Fn() -> bool,
+) -> Result<std::process::Output, String> {
     let mut stdout = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut child = command
@@ -156,6 +164,11 @@ pub(crate) fn bounded_output(
         .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + timeout;
     let status = loop {
+        if !active() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("操作已取消".into());
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
@@ -193,4 +206,20 @@ fn split_lines(bytes: &[u8]) -> Vec<String> {
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cancelled_capture_child_is_reaped_promptly() {
+        let started = Instant::now();
+        let result = bounded_output_while(
+            Command::new("sleep").arg("10"),
+            Duration::from_secs(15),
+            || started.elapsed() < Duration::from_millis(40),
+        );
+        assert_eq!(result.unwrap_err(), "操作已取消");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

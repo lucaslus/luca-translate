@@ -11,6 +11,7 @@
 mod config;
 mod db;
 mod desktop_control;
+mod desktop_shortcuts;
 mod diagnostics;
 mod hotkeys;
 mod ocr_diagnostics;
@@ -196,13 +197,8 @@ fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     match key.as_str() {
         // 划词翻译：隐藏窗口 → 捕获选中文本 → 回到窗口并翻译
         "selection" => selection_translate(app),
-        // 输入翻译：唤起主窗口聚焦输入框
-        "input" => {
-            show_main(app);
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.emit("lucas://focus-input", ());
-            }
-        }
+        // 输入翻译：清空旧内容，开始一次新的输入。
+        "input" => desktop_control::new_input(app),
         // 截图翻译 / 静默截图 OCR
         "screenshot" => start_region_capture(app, false),
         "ocr" => start_region_capture(app, true),
@@ -563,6 +559,8 @@ fn main() {
             settings_commands::quit_app,
             settings_commands::get_preferences,
             settings_commands::set_preferences,
+            settings_commands::check_shortcuts,
+            desktop_shortcuts::set_shortcut_recording,
             settings_commands::get_official_config,
             settings_commands::set_official_config,
             settings_commands::test_official_connection,

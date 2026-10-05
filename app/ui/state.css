@@ -77,6 +77,12 @@
   text-align: left;
   margin-top: 22px;
 }
+body.omarchy .shortcut-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+body.omarchy .shortcut-item > span {
+  white-space: nowrap;
+}
 .shortcut-item {
   display: flex;
   align-items: center;

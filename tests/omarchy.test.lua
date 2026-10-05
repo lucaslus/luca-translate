@@ -1,6 +1,8 @@
 -- Exercise the actual integration with a synthetic compositor, never real clicks.
 local bindings, windows, closed = {}, {}, {}
 local screenshot, launched
+local current_submap, active_window, timer_callback, escape_callback = "", nil, nil, nil
+local events, timer_enabled = {}, false
 local cursor = { x = 100, y = 100 }
 o = {
   window = function() end,
@@ -13,11 +15,30 @@ o = {
   end,
 }
 hl = {
+  get_active_window = function() return active_window end,
+  get_current_submap = function() return current_submap end,
+  define_submap = function(name, callback) assert(name == "lucas-translate-recording"); callback() end,
+  bind = function(key, callback, opts)
+    assert(key == "Escape" and opts.non_consuming and opts.ignore_mods)
+    escape_callback = callback
+  end,
+  on = function(event, callback) events[event] = callback end,
+  timer = function(callback, opts)
+    assert(opts.type == "repeat" and opts.timeout == 250)
+    timer_callback = callback
+    return { set_enabled = function(_, enabled) timer_enabled = enabled end }
+  end,
   get_cursor_pos = function() return cursor end,
   get_windows = function() return windows end,
-  dispatch = function(command) closed[#closed + 1] = command end,
+  dispatch = function(command)
+    if type(command) == "function" then return command() end
+    closed[#closed + 1] = command
+  end,
   exec_cmd = function(command) launched = command end,
-  dsp = { window = { close = function(args) return args.window end } },
+  dsp = {
+    submap = function(name) return function() current_submap = name == "reset" and "" or name end end,
+    window = { close = function(args) return args.window end },
+  },
 }
 dofile("packaging/omarchy/lucas-translate.lua")
 assert(#bindings == 3)
@@ -84,3 +105,31 @@ editor.title = "Tensaku"
 bindings[1]()
 assert(#closed == before + 1, "ordinary Tensaku windows stay open")
 print("PASS dedicated screenshot editor outside-click cancellation")
+
+-- Recording protection is leased to the exact settings window and session token.
+assert(not lucas_translate_shortcut_recording(true, "first", 123))
+active_window = { class = "lucas-translate", title = "Lucas Translate 偏好设置", pid = 123 }
+current_submap = "user-mode"
+assert(lucas_translate_shortcut_recording(true, "first", 123))
+assert(current_submap == "lucas-translate-recording" and timer_enabled)
+assert(lucas_translate_shortcut_recording(true, "second", 123))
+lucas_translate_shortcut_recording(false, "first", 123)
+assert(current_submap == "lucas-translate-recording", "stale input blur cannot end a newer lease")
+escape_callback()
+assert(current_submap == "user-mode" and not timer_enabled, "Escape restores the previous map")
+assert(lucas_translate_shortcut_recording(true, "third", 123))
+active_window = nil
+events["window.active"]()
+assert(current_submap == "user-mode" and not timer_enabled, "focus loss restores shortcuts immediately")
+active_window = { class = "lucas-translate", title = "Lucas Translate 偏好设置", pid = 123 }
+assert(lucas_translate_shortcut_recording(true, "fourth", 123))
+local original_time = os.time
+os.time = function() return original_time() + 10 end
+timer_callback()
+os.time = original_time
+assert(current_submap == "user-mode" and not timer_enabled, "hung webview cannot leave global keys disabled")
+assert(lucas_translate_shortcut_recording(true, "fifth", 123))
+current_submap = "another-mode"
+timer_callback()
+assert(current_submap == "another-mode", "never overwrite a subsequent desktop mode")
+print("PASS shortcut recording lease, stale tokens, Escape, focus loss, timeout and other submaps")

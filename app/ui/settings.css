@@ -198,18 +198,40 @@ body.mac .side {
   font-size: 12px;
 }
 .mini-select {
+  -webkit-appearance: none;
+  appearance: none;
   min-width: 0;
-  background: var(--bg-sunken);
+  background-color: var(--bg-sunken);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%237f7f85' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   border: 1px solid var(--border);
   border-radius: var(--r-chip);
   color: var(--text-1);
   font-size: 12px;
   font-family: inherit;
-  padding: 4px 8px;
+  padding: 7px 30px 7px 10px;
+  min-height: 34px;
   outline: none;
   cursor: pointer;
   flex: 1;
 }
+.mini-select option {
+  background: var(--bg-sunken);
+  color: var(--text-1);
+}
+.field > .mini-select { width: auto; min-width: 100px; }
+.field input:not([type="checkbox"]) {
+  -webkit-appearance: none;
+  appearance: none;
+  border-color: var(--border-strong);
+  caret-color: var(--text-1);
+}
+.hotkey-conflict { color: var(--danger); font-size: 12px; margin-top: 5px; }
+.field input[aria-invalid="true"] { border-color: var(--danger); }
+.hotkey-edit { display: flex; gap: 8px; }
+.hotkey-edit input { min-width: 0; flex: 1; }
+.hotkey-edit button { flex-shrink: 0; }
 .mini-select:focus {
   border-color: var(--accent);
 }
@@ -377,3 +399,23 @@ kbd {
 #official-enabled { width: auto; margin-right: 6px; }
 #update-progress { width: 100%; accent-color: var(--accent); }
 [hidden] { display: none !important; }
+
+.hotkey-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 28px;
+  font-size: 20px;
+  font-weight: 600;
+  cursor: help;
+  color: var(--text-2);
+}
+.hotkey-indicator[data-status="ok"] { color: var(--ok); }
+.hotkey-indicator[data-status="conflict"],
+.hotkey-indicator[data-status="error"] { color: var(--danger); }
+.hotkey-indicator:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+.recording-note { margin-top: 6px; color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
+.field input.is-recording { border-color: var(--accent); }

@@ -163,8 +163,23 @@ async function main() {
                 model: "mock",
                 has_api_key: true,
               };
-            if (name === "get_preferences") return {preferences: mock.preferences || {font_size:14,shortcuts:{input:"Alt+A",selection:"Alt+D",screenshot:"Alt+S",ocr:"Alt+C"}}, warnings:[],desktop_managed:new URL(location.href).searchParams.has("omarchy")};
-            if (name === "set_preferences") { mock.preferences = args.preferences; return; }
+            if (name === "get_preferences") return {preferences: mock.preferences || {font_size:14,shortcuts:new URL(location.href).searchParams.has("omarchy")
+              ? {input:"Super+Ctrl+Shift+I",toggle:"Super+Ctrl+Shift+T",selection:"Super+Ctrl+Shift+D",screenshot:"Super+Ctrl+Shift+S",ocr:"Super+Ctrl+Shift+C",annotate:"Super+Ctrl+Shift+P"}
+              : {input:"Alt+A",selection:"Alt+D",screenshot:"Alt+S",ocr:"Alt+C"}}, warnings:[], conflicts:mock.conflicts || {},desktop_managed:new URL(location.href).searchParams.has("omarchy")};
+            if (name === "check_shortcuts") return Object.fromEntries(Object.entries(args.preferences.shortcuts).filter(([,key]) => key === "Super+Ctrl+Shift+A").map(([action]) => [action, "Super+Ctrl+Shift+A 与「Agent」冲突，请重新设置"]));
+            if (name === "set_preferences") {
+              mock.preferences = structuredClone(args.preferences);
+              if (!args.fontOnly) {
+                mock.conflicts = {};
+                for (const [action,key] of Object.entries(mock.preferences.shortcuts)) {
+                  if (key === "Super+Ctrl+Shift+A") {
+                    mock.preferences.shortcuts[action] = "";
+                    mock.conflicts[action] = "Super+Ctrl+Shift+A 与「Agent」冲突，请重新设置";
+                  }
+                }
+              }
+              return;
+            }
             if (name === "get_official_config") return {enabled:false,pro:false,has_api_key:true};
             if (name === "check_update") return {current:"0.1.0", version:"0.2.0", installable:true};
             if (name === "permission_status")
@@ -1189,19 +1204,75 @@ async function main() {
     await page.goto(base + "/settings.html?omarchy=1");
     await page.waitForLoadState("networkidle");
     await page.locator('[data-view="hotkeys"]').click();
-    assert(await page.locator("#hotkey-save").isHidden());
-    assert((await page.locator("#hotkey-hint").textContent()).includes("hyprctl reload"));
-    await page.locator('[data-view="permissions"]').click();
-    assert((await page.locator("#view-permissions").textContent()).includes("Wayland PRIMARY"));
-    assert(await page.locator("#open-accessibility").isHidden());
+    assert(await page.locator("#hotkey-save").isVisible());
+    await page.locator("#hotkey-input").focus();
+    await page.waitForFunction(() => document.querySelector("#hotkey-input").classList.contains("is-recording"));
+    const initialShortcut = await page.locator("#hotkey-input").inputValue();
+    await page.locator("#hotkey-input").evaluate(node => node.dispatchEvent(new KeyboardEvent("keydown", {key:"Super",code:"MetaLeft",ctrlKey:true,bubbles:true})));
+    assert.equal(await page.locator("#hotkey-input").inputValue(), initialShortcut, "WebKit Super modifier must not become the final key");
+    await page.locator("#hotkey-input").evaluate(node => {
+      node.dispatchEvent(new KeyboardEvent("keydown", {key:"p",code:"KeyP",ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}));
+      node.dispatchEvent(new KeyboardEvent("keyup", {key:"Super",code:"MetaLeft",bubbles:true}));
+    });
+    assert.equal(await page.locator("#hotkey-input").inputValue(), "Super+Ctrl+Shift+P");
+    await page.locator("#hotkey-input").press("Control+Shift+K");
+    assert.equal(await page.locator("#hotkey-input").inputValue(), "Ctrl+Shift+K");
+    assert(await page.locator("#hotkey-recording-input").isVisible());
+    await page.locator("#hotkey-input").press("Escape");
+    await page.waitForFunction(() => __mock.calls.some(c => c.name === "set_shortcut_recording" && !c.args.active));
+    assert.equal(await page.evaluate(() => __mock.closed), undefined);
+    assert(await page.locator("#hotkey-recording-input").isHidden());
+    await page.locator("#hotkey-input").fill("Super+Ctrl+Shift+I");
+    check("shortcut capture waits for desktop protection and Escape ends recording without closing settings");
+
+    assert.equal(await page.locator("#hotkey-input").inputValue(), "Super+Ctrl+Shift+I");
+    assert(await page.locator('[data-view="permissions"]').isHidden());
+    await page.locator("#hotkey-input").fill("Super+Ctrl+Shift+A");
+    await page.waitForFunction(() => document.querySelector("#hotkey-conflict-input").textContent.includes("Agent"));
+    assert.equal(await page.locator("#hotkey-input").getAttribute("aria-invalid"), "true");
+    assert.equal(await page.locator("#hotkey-indicator-input").textContent(), "×");
+    assert((await page.locator("#hotkey-indicator-input").getAttribute("title")).includes("Agent"));
+    assert.equal(await page.locator("#hotkey-indicator-selection").textContent(), "✓");
+    const indicatorLayout = await page.locator("#hotkey-input").evaluate(node => {
+      const field = node.getBoundingClientRect();
+      const status = document.querySelector("#hotkey-indicator-input").getBoundingClientRect();
+      return status.left >= field.right && Math.abs((status.top + status.bottom) / 2 - (field.top + field.bottom) / 2) < 2;
+    });
+    assert(indicatorLayout, "conflict indicator stays immediately after its input");
+    await page.locator("#hotkey-save").click();
+    await page.waitForFunction(() => document.querySelector("#hotkey-status").textContent.includes("已留空"));
+    assert.equal(await page.locator("#hotkey-input").inputValue(), "");
+    assert.equal(await page.locator("#hotkey-toggle").inputValue(), "Super+Ctrl+Shift+T");
+    await page.locator(".content").evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({path:join(output,"omarchy-hotkey-conflict.png")});
+    await page.locator("#hotkey-input").fill("Super+Ctrl+Shift+I");
+    await page.locator("#hotkey-save").click();
+    await page.waitForFunction(() => document.querySelector("#hotkey-status").textContent.includes("立即生效"));
+    assert(await page.locator("#hotkey-conflict-input").isHidden());
+    check("Omarchy shortcuts check conflicts, clear occupied fields on save, retain other bindings and allow reassignment");
+    await page.locator('[data-view="general"]').click();
+    for (const appearance of ["dark", "light"]) {
+      await page.locator(`#theme-seg [data-theme="${appearance}"]`).click();
+      await page.waitForTimeout(220);
+      const colors = await page.locator("#reading-size").evaluate(node => {
+        const css = getComputedStyle(node);
+        return { appearance:css.appearance, color:css.color, background:css.backgroundColor, scheme:css.colorScheme };
+      });
+      assert.equal(colors.appearance, "none");
+      assert.equal(colors.scheme, appearance);
+      assert.notEqual(colors.color, colors.background);
+      await page.screenshot({path:join(output,`omarchy-settings-${appearance}.png`)});
+    }
+    check("Omarchy settings hide macOS permissions and use themed select controls in both themes");
     await page.locator("#settings-quit").click();
     await page.waitForFunction(() => __mock.calls.some(c => c.name === "quit_app"));
-    check("Omarchy settings show desktop shortcut management, Wayland guidance and working quit");
     await page.goto(base + "/index.html?omarchy=1");
     await page.waitForLoadState("networkidle");
     assert(await page.locator(".titlebar").isHidden());
     assert(await page.locator("#btn-pin").isHidden());
     assert(await page.locator(".statusbar #btn-settings").isVisible());
+    assert(await page.locator(".shortcut-item > span").evaluateAll(nodes => nodes.every(node => node.getBoundingClientRect().height < 25)));
+    await assertLayout("Omarchy welcome with long desktop shortcuts");
     await page.locator("#btn-settings").click();
     assert(await page.evaluate(() => __mock.calls.some(c => c.name === "open_settings")));
     assert(await page.evaluate(() => __mock.calls.some(c => c.name === "setup_desktop")));
@@ -1213,6 +1284,18 @@ async function main() {
     assert(await page.locator("#panel").isHidden());
     assert.equal(await page.locator("#input").inputValue(), "preserve Omarchy input");
     check("Omarchy Escape closes history and hides immediately without clearing input");
+    id = await start("old translation before new input");
+    await page.locator("#btn-history").click();
+    await page.evaluate(() => __mock.emit("new-input"));
+    assert.equal(await page.locator("#input").inputValue(), "");
+    assert(await page.locator("#panel").isHidden());
+    assert.equal(await page.evaluate(() => document.activeElement.id), "input");
+    assert(await page.evaluate(id => __mock.calls.some(c => c.name === "cancel_translation" && c.args.requestId === id), id));
+    await event(id, "result", value("LATE RESULT"));
+    await event(id, "done");
+    assert.equal(await page.locator(".svc-body").count(), 0);
+    assert((await page.locator("#result").textContent()).includes("输入或划词开始翻译"));
+    check("new input clears old text, closes history, cancels work, focuses editor and ignores late results");
     assert.deepEqual(errors, []);
     check("no uncaught JavaScript errors");
     console.log(

@@ -13,6 +13,8 @@ fn main() {
             "quit_app",
             "get_preferences",
             "set_preferences",
+            "check_shortcuts",
+            "set_shortcut_recording",
             "get_official_config",
             "set_official_config",
             "test_official_connection",

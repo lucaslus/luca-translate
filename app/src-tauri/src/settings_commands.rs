@@ -3,8 +3,27 @@ use tauri::{AppHandle, Emitter, WebviewWindow};
 #[tauri::command]
 pub async fn get_preferences(window: WebviewWindow) -> Result<serde_json::Value, String> {
     allow_window(&window, &["main", "settings"])?;
-    let preferences = storage(config::preferences).await?;
-    Ok(serde_json::json!({"preferences":preferences,"warnings":hotkeys::warnings(),"desktop_managed":crate::desktop_control::hyprland()}))
+    storage(|| {
+        let mut preferences = config::preferences()?;
+        let desktop = crate::desktop_control::hyprland();
+        let mut warnings = hotkeys::warnings();
+        let mut conflicts = std::collections::BTreeMap::new();
+        if desktop {
+            let data = crate::desktop_shortcuts::run("--status", None)?;
+            preferences.shortcuts = data.shortcuts;
+            conflicts = data.conflicts;
+            warnings.extend(conflicts.values().cloned());
+        }
+        Ok(serde_json::json!({"preferences":preferences,"warnings":warnings,"conflicts":conflicts,"desktop_managed":desktop}))
+    }).await
+}
+#[tauri::command]
+pub async fn check_shortcuts(
+    window: WebviewWindow,
+    preferences: config::Preferences,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    allow_window(&window, &["settings"])?;
+    storage(move || hotkeys::check(&preferences)).await
 }
 #[tauri::command]
 pub async fn set_preferences(

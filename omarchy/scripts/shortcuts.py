@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""Manage only Lucas Translate's bindings; leave occupied shortcuts unassigned."""
+import argparse
+import collections
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+DEFAULTS = dict(input='Super+Ctrl+Shift+I', toggle='Super+Ctrl+Shift+T',
+                selection='Super+Ctrl+Shift+D', screenshot='Super+Ctrl+Shift+S',
+                ocr='Super+Ctrl+Shift+C', annotate='Super+Ctrl+Shift+P')
+DESCRIPTIONS = dict(input='Translate: new input', toggle='Translate: show / hide',
+                    selection='Translate: selection', screenshot='Translate: screenshot',
+                    ocr='Translate: OCR to clipboard', annotate='Translate: screenshot and annotate')
+LEGACY_HASHES = {
+    'f24b0b707eafd459d5e430831659dbcac6891e4138b7dbcb3201ad41af2a3590',
+    '34fb230dcdc87c78de5dec3aa1b70573910eaa89fc8652f150e689b146e18d91',
+    'f5761e588225d3adaea5bafdd68d20ff848d796061fa1c3d37de2aac5d762077',
+    '05ae18d7254ffb2857b9625e4676ce607eebe4400fc684ef3c564636480b765c',
+    'd10eb62792817c7ecf466cdae2e2824a339e8fcda2238ccba99608b47d41af96',
+    'ddfb42de3b6dd47586bd408e2f4b546f86110dd7ee50325ca1695ed586484882',
+}
+MODS = {'Super': 64, 'Ctrl': 4, 'Alt': 8, 'Shift': 1}
+ALIASES = {'control': 'Ctrl', 'ctrl': 'Ctrl', 'super': 'Super', 'meta': 'Super',
+           'command': 'Super', 'cmd': 'Super', 'alt': 'Alt', 'option': 'Alt', 'shift': 'Shift'}
+KEYS = {k.lower(): k for k in ['Space', 'Tab', 'Return', 'Escape', 'BackSpace',
+                             'Delete', 'Insert', 'Home', 'End', 'Page_Up', 'Page_Down',
+                             'Left', 'Right', 'Up', 'Down']}
+KEYS.update(enter='Return', esc='Escape', pageup='Page_Up', pagedown='Page_Down',
+            arrowleft='Left', arrowright='Right', arrowup='Up', arrowdown='Down')
+# Physical XKB codes are checked as well as symbolic bindings (evdev + 8).
+CODES = dict(zip(range(24, 34), 'QWERTYUIOP'))
+CODES.update(zip(range(38, 47), 'ASDFGHJKL'))
+CODES.update(zip(range(52, 59), 'ZXCVBNM'))
+CODES.update(zip(range(10, 20), '1234567890'))
+CODES.update({9: 'Escape', 22: 'BackSpace', 23: 'Tab', 36: 'Return', 65: 'Space',
+              110: 'Home', 111: 'Up', 112: 'Page_Up', 113: 'Left', 114: 'Right',
+              115: 'End', 116: 'Down', 117: 'Page_Down', 118: 'Insert', 119: 'Delete'})
+CODES.update({67 + i: f'F{i + 1}' for i in range(10)})
+CODES.update({95: 'F11', 96: 'F12', **{191 + i: f'F{i + 13}' for i in range(12)}})
+INCLUDE = 'dofile(os.getenv("HOME") .. "/.config/hypr/lucas-translate.lua")'
+
+
+def parse_key(value):
+    if not isinstance(value, str) or len(value) > 80:
+        raise ValueError('快捷键格式无效')
+    if not value.strip():
+        return '', None
+    parts = [p.strip() for p in value.split('+')]
+    modifiers = [ALIASES.get(p.lower()) for p in parts[:-1]]
+    if not modifiers or None in modifiers or len(set(modifiers)) != len(modifiers):
+        raise ValueError(f'无法识别快捷键 {value}，示例：Super+Ctrl+Shift+I')
+    if not any(m in modifiers for m in ('Super', 'Ctrl', 'Alt')):
+        raise ValueError('快捷键至少包含 Super、Ctrl 或 Alt')
+    raw = parts[-1]
+    key = raw.upper() if re.fullmatch(r'[a-zA-Z0-9]|[fF](?:[1-9]|1[0-9]|2[0-4])', raw) else KEYS.get(raw.lower())
+    if not key:
+        raise ValueError(f'不支持按键 {raw}；请使用字母、数字、F1–F24 或导航键')
+    mods = [m for m in MODS if m in modifiers]
+    return '+'.join(mods + [key]), (sum(MODS[m] for m in mods), key.upper())
+
+
+def normalized(shortcuts):
+    if not isinstance(shortcuts, dict) or set(shortcuts) != set(DEFAULTS):
+        raise ValueError('快捷键配置不完整')
+    return {action: parse_key(value)[0] for action, value in shortcuts.items()}
+
+
+def bind_identity(bind):
+    key = bind.get('key', '')
+    code = bind.get('keycode', 0)
+    if key.startswith('code:'):
+        try:
+            code = int(key[5:])
+        except ValueError:
+            pass
+        key = ''
+    key = key or CODES.get(code, '')
+    key = KEYS.get(key.lower(), key).upper()
+    return bind.get('modmask', 0), key
+
+
+def find_conflicts(shortcuts, bindings, owned):
+    """Subtract at most one known own callback per action; duplicates still conflict."""
+    remaining = collections.Counter()
+    for action, key in owned.items():
+        if key:
+            remaining[(parse_key(key)[1], DESCRIPTIONS[action])] += 1
+    external = []
+    for bind in bindings:
+        if owned and bind.get('submap') == 'lucas-translate-recording' and bind.get('description') == 'Lucas Translate: finish shortcut recording':
+            continue
+        identity = bind_identity(bind)
+        marker = (identity, bind.get('description', ''))
+        if remaining[marker] and not bind.get('submap'):
+            remaining[marker] -= 1
+        else:
+            external.append(bind)
+    grouped = collections.defaultdict(list)
+    for action, key in shortcuts.items():
+        if key:
+            grouped[parse_key(key)[1]].append(action)
+    conflicts = {}
+    for action, key in shortcuts.items():
+        if not key:
+            continue
+        identity = parse_key(key)[1]
+        if len(grouped[identity]) > 1:
+            conflicts[action] = f'{key} 与本应用的其他操作重复，请重新设置'
+            continue
+        for bind in external:
+            mask, bound = bind_identity(bind)
+            if (mask == identity[0] or bind.get('ignore_mods')) and (bound == identity[1] or bind.get('catch_all')):
+                label = bind.get('description') or '已有桌面快捷键'
+                conflicts[action] = f'{key} 与「{label}」冲突，请重新设置'
+                break
+    return conflicts
+
+
+def render(template, shortcuts):
+    block = 'local shortcuts = {\n' + ''.join(
+        f'  {action} = "{key.upper().replace("+", " + ")}",\n' for action, key in shortcuts.items()
+    ) + '}\n'
+    start = '-- BEGIN MANAGED SHORTCUTS\n'
+    end = '-- END MANAGED SHORTCUTS'
+    before, rest = template.split(start, 1)
+    _, after = rest.split(end, 1)
+    return before + start + block + end + after
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic_write(path, data):
+    temp = path.with_name(path.name + '.tmp')
+    temp.write_bytes(data)
+    temp.replace(path)
+
+
+def hypr(*args):
+    return subprocess.check_output(['hyprctl', *args], text=True, timeout=5)
+
+
+def manage(folder, template, mode, requested=None):
+    config = folder / 'hyprland.lua'
+    target = folder / 'lucas-translate.lua'
+    state_file = folder / 'lucas-translate-shortcuts.json'
+    original = config.read_bytes()
+    current = target.read_bytes() if target.exists() else None
+    old_state = state_file.read_bytes() if state_file.exists() else None
+    state = json.loads(old_state) if old_state else {}
+    legacy = current is not None and digest(current) in LEGACY_HASHES
+    managed = current is None or legacy or current == template.encode() or digest(current) == state.get('sha256')
+    if not managed:
+        raise ValueError(f'{target} 有手动修改；请先备份并移走该文件，再重新打开应用以启用设置页管理。原文件未覆盖。')
+    existing = normalized(state['shortcuts']) if state else dict(DEFAULTS)
+    owned = existing if current and INCLUDE.encode() in original else {}
+    if legacy:
+        owned = {k: v for k, v in owned.items() if k != 'input'}
+    invalid = {}
+    if mode == 'check' and requested is not None:
+        if not isinstance(requested, dict) or set(requested) != set(DEFAULTS):
+            raise ValueError('快捷键配置不完整')
+        desired = {}
+        for action, value in requested.items():
+            try:
+                desired[action] = parse_key(value)[0]
+            except ValueError as error:
+                desired[action] = ''
+                invalid[action] = str(error)
+    else:
+        desired = normalized(requested) if requested is not None else existing
+    conflicts = find_conflicts(desired, json.loads(hypr('binds', '-j')), owned)
+    if mode == 'check':
+        return {'shortcuts': desired, 'conflicts': {**conflicts, **invalid}}
+    # Keep the explanation after a conflicting default has been cleared and across restarts.
+    remembered = {k: v for k, v in state.get('conflicts', {}).items()
+                  if not desired.get(k) and (requested is None or not existing.get(k))}
+    remembered.update(conflicts)
+    accepted = {k: '' if k in conflicts else v for k, v in desired.items()}
+    result = {'shortcuts': accepted, 'conflicts': remembered}
+    if mode == 'status':
+        return result
+    content = render(template, accepted).encode()
+    next_state = {**result, 'sha256': digest(content)}
+    state_bytes = (json.dumps(next_state, ensure_ascii=False, indent=2) + '\n').encode()
+    config_bytes = original if INCLUDE.encode() in original else (
+        original.rstrip() + b'\n\n-- Lucas Translate floating panel and shortcuts\n' + INCLUDE.encode() + b'\n')
+    if current == content and original == config_bytes and old_state == state_bytes:
+        return result
+    stamp = time.time_ns()
+    for path in (config, target, state_file):
+        if path.exists():
+            shutil.copy2(path, path.with_name(f'{path.name}.lucas-backup-{stamp}'))
+    try:
+        atomic_write(target, content)
+        atomic_write(config, config_bytes)
+        hypr('reload')
+        errors = hypr('configerrors').strip()
+        if errors:
+            raise RuntimeError(errors)
+        atomic_write(state_file, state_bytes)
+    except Exception:
+        for path, previous in ((config, original), (target, current), (state_file, old_state)):
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write(path, previous)
+        hypr('reload')
+        raise
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--template-text')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--auto', action='store_true')
+    group.add_argument('--status', action='store_true')
+    group.add_argument('--check')
+    group.add_argument('--apply')
+    args = parser.parse_args()
+    if os.geteuid() == 0:
+        raise ValueError('请以桌面用户运行，不要使用 sudo')
+    folder = Path.home() / '.config/hypr'
+    if not (folder / 'hyprland.lua').is_file():
+        raise ValueError('需要 Omarchy 的 Hyprland Lua 配置')
+    template = args.template_text or (Path(__file__).resolve().parents[1] / 'shortcuts.lua').read_text()
+    mode = 'check' if args.check is not None else 'status' if args.status else 'apply'
+    raw = args.check if args.check is not None else args.apply
+    with (folder / '.lucas-translate.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        result = manage(folder, template, mode, json.loads(raw) if raw is not None else None)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

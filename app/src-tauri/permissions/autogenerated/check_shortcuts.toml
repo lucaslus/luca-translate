@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-shortcuts"
+description = "Enables the check_shortcuts command without any pre-configured scope."
+commands.allow = ["check_shortcuts"]
+
+[[permission]]
+identifier = "deny-check-shortcuts"
+description = "Denies the check_shortcuts command without any pre-configured scope."
+commands.deny = ["check_shortcuts"]

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "lucas.translate",
+  "name": "Lucas Translate",
+  "version": "0.1.0",
+  "author": "Lucas",
+  "description": "Native, theme-following translation, dictionary and local OCR for Omarchy Shell.",
+  "kinds": ["service", "panel", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "panel": "Panel.qml",
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Lucas Translate",
+    "description": "Open translation or translate the current selection.",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {}
+  }
+}

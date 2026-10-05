@@ -69,9 +69,6 @@ pub fn warnings() -> Vec<String> {
 }
 pub fn initialize(app: &AppHandle) {
     if crate::desktop_control::hyprland() {
-        state().lock().unwrap_or_else(|e| e.into_inner()).warnings = vec![
-            "Omarchy / Hyprland 快捷键由桌面管理：Super+Ctrl+Shift+T 显示/隐藏，D 划词，S 截图翻译，C 静默 OCR。请安装随包提供的 Omarchy 配置；应用内改键不影响桌面绑定。".into(),
-        ];
         return;
     }
     let mut state = state().lock().unwrap_or_else(|e| e.into_inner());
@@ -92,10 +89,11 @@ pub fn initialize(app: &AppHandle) {
     }
 }
 pub fn save(app: &AppHandle, p: Preferences) -> Result<(), String> {
-    let next = parse(&p)?;
     if crate::desktop_control::hyprland() {
-        return config::save_preferences(p);
+        crate::desktop_shortcuts::run("--apply", Some(&p.shortcuts))?;
+        return Ok(());
     }
+    let next = parse(&p)?;
     let mut state = state().lock().map_err(|_| "快捷键设置不可用")?;
     let mut added = Vec::new();
     for (id, (key, _)) in &next {
@@ -123,6 +121,13 @@ pub fn save(app: &AppHandle, p: Preferences) -> Result<(), String> {
     state.active = next;
     state.warnings.clear();
     Ok(())
+}
+pub fn check(p: &Preferences) -> Result<BTreeMap<String, String>, String> {
+    if crate::desktop_control::hyprland() {
+        return Ok(crate::desktop_shortcuts::run("--check", Some(&p.shortcuts))?.conflicts);
+    }
+    parse(p)?;
+    Ok(BTreeMap::new()) // Other platforms detect OS registration conflicts when saving.
 }
 #[cfg(test)]
 mod tests {

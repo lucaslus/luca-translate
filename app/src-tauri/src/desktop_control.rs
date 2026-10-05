@@ -7,6 +7,7 @@ enum Action {
     Show,
     Hide,
     Toggle,
+    Input,
     Selection,
     Screenshot,
     Ocr,
@@ -16,10 +17,11 @@ fn parse(args: &[String]) -> Result<Action, &'static str> {
         None | Some("--show") => Ok(Action::Show),
         Some("--hide") => Ok(Action::Hide),
         Some("--toggle") => Ok(Action::Toggle),
+        Some("--input") => Ok(Action::Input),
         Some("--selection") => Ok(Action::Selection),
         Some("--screenshot") => Ok(Action::Screenshot),
         Some("--ocr") => Ok(Action::Ocr),
-        _ => Err("Usage: lucas-translate [--show|--hide|--toggle|--selection|--screenshot|--ocr]"),
+        _ => Err("Usage: lucas-translate [--show|--hide|--toggle|--input|--selection|--screenshot|--ocr]"),
     }
     .and_then(|action| {
         if args.len() <= 2 {
@@ -78,6 +80,10 @@ pub fn receive(app: &AppHandle, args: &[String]) {
             );
         } else {
             state.pending = Some(action);
+            if action == Action::Input {
+                drop(state);
+                schedule(app, Action::Show);
+            }
         }
         return;
     }
@@ -103,32 +109,21 @@ fn schedule(app: &AppHandle, action: Action) {
 
 /// Run the packaged helper as the desktop user, never from pacman's root hooks.
 #[tauri::command]
-pub async fn setup_desktop(window: WebviewWindow) -> Result<(), String> {
+pub async fn setup_desktop(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     crate::allow_window(&window, &["main"])?;
     #[cfg(target_os = "linux")]
     if hyprland() {
-        tauri::async_runtime::spawn_blocking(|| {
-            let helper = std::path::Path::new("/usr/bin/lucas-translate-setup-omarchy");
-            if !helper.is_file() {
-                return Ok(()); // Source builds and non-Arch packages have no installer.
-            }
-            let output = crate::platform::linux::bounded_output(
-                std::process::Command::new(helper).arg("--auto"),
-                std::time::Duration::from_secs(15),
-            )?;
-            if output.status.success() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Omarchy 快捷键未自动启用：{}。可运行 lucas-translate-setup-omarchy 重试。",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ))
-            }
-        })
-        .await
-        .map_err(|e| e.to_string())??;
+        tauri::async_runtime::spawn_blocking(|| crate::desktop_shortcuts::run("--auto", None))
+            .await
+            .map_err(|e| e.to_string())??;
     }
+    let _ = app.emit("lucas://preferences-changed", ());
     Ok(())
+}
+pub fn new_input(app: &AppHandle) {
+    crate::cancel_ocr(app.clone());
+    crate::show_main(app);
+    let _ = app.emit_to("main", "lucas://new-input", ());
 }
 fn dispatch(app: &AppHandle, action: Action) {
     match action {
@@ -150,6 +145,7 @@ fn dispatch(app: &AppHandle, action: Action) {
             crate::show_main(app);
             let _ = app.emit_to("main", "lucas://focus-input", ());
         }
+        Action::Input => new_input(app),
         Action::Selection => crate::selection_translate(app),
         Action::Screenshot => crate::start_region_capture(app, false),
         Action::Ocr => crate::start_region_capture(app, true),
@@ -212,11 +208,12 @@ pub fn focus_main(app: &AppHandle) {
 
 #[cfg(target_os = "linux")]
 pub fn capture(app: &AppHandle, silent: bool) {
-    use crate::platform::linux::bounded_output;
+    use crate::platform::linux::bounded_output_while;
     use std::{process::Command, sync::atomic::Ordering, time::Duration};
     if crate::OCR_RUNNING.swap(true, Ordering::AcqRel) {
         return;
     }
+    let capture_id = crate::CAPTURE_ID.fetch_add(1, Ordering::AcqRel) + 1;
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
     }
@@ -229,8 +226,13 @@ pub fn capture(app: &AppHandle, silent: bool) {
             }
         }
         let _guard = Guard;
+        let active = || crate::CAPTURE_ID.load(Ordering::Acquire) == capture_id;
         let result = (|| -> Result<Option<String>, String> {
-            let region = bounded_output(Command::new("slurp").arg("-d"), Duration::from_secs(120))?;
+            let region = bounded_output_while(
+                Command::new("slurp").arg("-d"),
+                Duration::from_secs(120),
+                active,
+            )?;
             if !region.status.success() {
                 return Ok(None);
             } // Esc/right click: cancel.
@@ -240,9 +242,10 @@ pub fn capture(app: &AppHandle, silent: bool) {
             }
             let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
             let png = dir.path().join("capture.png");
-            let shot = bounded_output(
+            let shot = bounded_output_while(
                 Command::new("grim").arg("-g").arg(region.trim()).arg(&png),
                 Duration::from_secs(10),
+                active,
             )?;
             if !shot.status.success() {
                 return Err("Wayland 截图失败，请检查 grim 和 slurp".into());
@@ -252,6 +255,9 @@ pub fn capture(app: &AppHandle, silent: bool) {
             }
             let bytes = std::fs::read(&png).map_err(|e| e.to_string())?;
             let lines = crate::platform::ocr_png(&bytes)?;
+            if !active() {
+                return Ok(None);
+            }
             let text = lucas_core::paragraph::merge_ocr_lines(&lines).join("\n");
             if text.trim().is_empty() {
                 return Err("未发现文字，请重新选择区域".into());
@@ -265,13 +271,16 @@ pub fn capture(app: &AppHandle, silent: bool) {
                 command
                     .args(["-c", "wl-copy --type text/plain < \"$1\"", "lucas-copy"])
                     .arg(dir.path().join("text.txt"));
-                let copied = bounded_output(&mut command, Duration::from_secs(3))?;
+                let copied = bounded_output_while(&mut command, Duration::from_secs(3), active)?;
                 if !copied.status.success() {
                     return Err("识别完成，但 Wayland 剪贴板写入失败".into());
                 }
             }
             Ok(Some(text))
         })();
+        if crate::CAPTURE_ID.load(Ordering::Acquire) != capture_id {
+            return;
+        }
         match result {
             Ok(Some(_)) if silent => crate::silent_feedback(&app, "OCR 文字已复制"),
             Ok(Some(text)) => {
@@ -302,6 +311,7 @@ mod tests {
         for (arg, expected) in [
             ("--toggle", Action::Toggle),
             ("--show", Action::Show),
+            ("--input", Action::Input),
             ("--hide", Action::Hide),
             ("--selection", Action::Selection),
             ("--screenshot", Action::Screenshot),

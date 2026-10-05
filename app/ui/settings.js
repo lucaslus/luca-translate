@@ -96,21 +96,10 @@ async function checkPermissions() {
   try {
     const s = await invoke("permission_status");
     if (s.platform && s.platform !== "macos") {
-      $("chip-accessibility").textContent = "非 TCC 权限";
-      $("chip-screen").textContent = "非 TCC 权限";
-      for (const id of ["open-accessibility", "open-screen"]) $(id).hidden = true;
-      $("chip-accessibility").closest(".row").querySelector(".d").textContent = s.platform === "linux"
-        ? s.desktop_managed
-          ? "Omarchy / Hyprland 使用 wl-clipboard 读取 Wayland PRIMARY 选区；不支持选区的应用请手动复制。API 密钥需要已解锁的 Secret Service。"
-          : "划词需要 X11 和 xclip；Wayland 尚不完整支持。API 密钥需要已解锁的 Secret Service。"
-        : "划词通过系统复制操作获取选区；受保护窗口或更高权限的应用可能无法读取。";
-      $("chip-screen").closest(".row").querySelector(".d").textContent = s.platform === "linux"
-        ? s.desktop_managed
-          ? "Omarchy / Hyprland 使用 slurp 框选、grim 截图，Tesseract 在本地识别；需要 eng / chi_sim 语言包。"
-          : "OCR 需要 Tesseract 与 eng / chi_sim 语言包。截图可用性取决于桌面会话。"
-        : "OCR 使用 Windows 系统识别能力，请安装对应语言包；受保护内容可能无法截取。";
+      document.querySelector('[data-view="permissions"]').hidden = true;
       return;
     }
+    document.querySelector('[data-view="permissions"]').hidden = false;
     for (const [id, ok] of [
       ["chip-accessibility", s.accessibility],
       ["chip-screen", s.screen_capture],

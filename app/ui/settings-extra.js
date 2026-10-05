@@ -7,7 +7,7 @@
     fontDirty = false,
     saving = false,
     updating = false,
-    desktopManaged = true;
+    desktopManaged = false;
   window.LucasSettingsDirty = () =>
     officialDirty || preferencesDirty || fontDirty || saving || updating;
   window.LucasSettingsBusy = () => saving || updating;
@@ -203,103 +203,157 @@
     );
   const hotkeys = el("div", { class: "group" });
   const labels = {
-    input: "输入翻译",
+    input: "空白输入翻译",
+    toggle: "显示 / 隐藏翻译窗口",
     selection: "划词翻译",
     screenshot: "截图翻译",
     ocr: "截图取字（仅复制）",
+    annotate: "截图编辑标注",
   };
+  let validationTimer, validationVersion = 0;
+  const actions = () => Object.keys(labels).filter((action) =>
+    desktopManaged || !["toggle", "annotate"].includes(action),
+  );
+  const editedShortcuts = () => Object.fromEntries(actions().map((action) => [
+    action, $("hotkey-" + action).value.trim(),
+  ]));
+  function rowStatus(action, kind, message) {
+    const indicator = $("hotkey-indicator-" + action);
+    indicator.dataset.status = kind;
+    indicator.textContent = { ok: "✓", conflict: "×", pending: "…", disabled: "—", error: "!" }[kind];
+    indicator.title = message;
+    indicator.setAttribute("aria-label", message);
+    $("hotkey-" + action).setAttribute("aria-invalid", String(kind === "conflict"));
+    $("hotkey-conflict-" + action).textContent = message;
+    $("hotkey-conflict-" + action).hidden = kind !== "conflict" && kind !== "error";
+  }
+  function showConflicts(conflicts = {}) {
+    for (const action of Object.keys(labels)) {
+      const value = $("hotkey-" + action).value.trim();
+      rowStatus(action, conflicts[action] ? "conflict" : value ? "ok" : "disabled",
+        conflicts[action] || (value ? "未发现桌面快捷键冲突；其他应用内部快捷键无法自动检测" : "未设置，已禁用"));
+    }
+  }
+  async function validateShortcuts() {
+    if (!preferences || saving) return;
+    const version = ++validationVersion;
+    try {
+      const conflicts = await invoke("check_shortcuts", {
+        preferences: { ...preferences, shortcuts: editedShortcuts() },
+      });
+      if (version !== validationVersion || saving) return;
+      showConflicts(conflicts);
+      hotkeyStatus.textContent = Object.keys(conflicts).length
+        ? "尚未保存；请查看各行的 × 提示"
+        : desktopManaged ? "尚未保存" : "格式正确；保存时检查系统占用";
+    } catch (error) {
+      if (version === validationVersion) {
+        for (const action of actions())
+          if ($("hotkey-" + action).value.trim()) rowStatus(action, "error", "检测失败：" + error);
+        hotkeyStatus.textContent = "检测暂时不可用，请稍后重试";
+      }
+    }
+  }
+  function changed() {
+    preferencesDirty = true;
+    ++validationVersion;
+    clearTimeout(validationTimer);
+    hotkeyStatus.textContent = "尚未保存";
+    for (const action of actions()) rowStatus(action, "pending", "正在检测…");
+    validationTimer = setTimeout(validateShortcuts, 350);
+  }
   for (const [action, label] of Object.entries(labels)) {
     const input = el("input", {
       id: "hotkey-" + action,
       type: "text",
       spellcheck: "false",
       autocomplete: "off",
-      placeholder: "例如 Alt+A；留空禁用",
+      disabled: true,
+      placeholder: "输入组合键；留空禁用",
       maxlength: 80,
+      "aria-describedby": "hotkey-conflict-" + action,
     });
-    input.addEventListener("input", () => {
-      preferencesDirty = true;
-      hotkeyStatus.textContent = "尚未保存";
+    input.addEventListener("input", changed);
+    const recordingNote = el("p", { class: "recording-note", id: "hotkey-recording-" + action, hidden: true, role: "status" });
+    window.LucasShortcutRecorder.attach(input, recordingNote, () => desktopManaged && !!preferences, changed);
+    const clear = button("清空", () => { input.value = ""; changed(); input.focus(); });
+    clear.disabled = true;
+    clear.setAttribute("aria-label", "清空" + label + "快捷键");
+    const row = field(label, input);
+    row.id = "hotkey-field-" + action;
+    const edit = el("div", { class: "hotkey-edit" });
+    input.replaceWith(edit);
+    const indicator = el("span", {
+      id: "hotkey-indicator-" + action, class: "hotkey-indicator", role: "img", tabindex: "0",
+      "aria-label": "等待检测", title: "等待检测", "data-status": "pending", text: "…",
     });
-    hotkeys.append(field(label, input));
+    edit.append(input, indicator, clear);
+    row.append(el("p", { id: "hotkey-conflict-" + action, class: "state-sr-only", hidden: true, role: "status" }));
+    row.append(recordingNote);
+    hotkeys.append(row);
   }
   const hotkeyStatus = status("hotkey-status");
-  const hotkeySave = button(
-    "保存快捷键",
-    async () => {
-      if (!preferences || saving || desktopManaged) return;
-      saving = true;
-      hotkeySave.disabled = true;
-      hotkeyStatus.textContent = "正在检查并保存…";
-      const shortcuts = Object.fromEntries(
-        Object.keys(labels).map((action) => [
-          action,
-          $("hotkey-" + action).value.trim(),
-        ]),
-      );
-      try {
-        await invoke("set_preferences", {
-          preferences: { ...preferences, shortcuts },
-        });
-        preferences.shortcuts = shortcuts;
-        preferencesDirty = false;
-        await window.LucasPreferences.refresh();
-        hotkeyStatus.textContent = "已保存，立即生效";
-      } catch (error) {
-        hotkeyStatus.textContent = String(error);
-      } finally {
-        saving = false;
-        hotkeySave.disabled = false;
-      }
-    },
-    true,
-  );
+  const hotkeySave = button("保存快捷键", async () => {
+    if (!preferences || saving) return;
+    window.LucasShortcutRecorder.stop();
+    saving = true;
+    ++validationVersion;
+    clearTimeout(validationTimer);
+    hotkeys.querySelectorAll("input, button").forEach((node) => { node.disabled = true; });
+    hotkeyStatus.textContent = "正在检查并保存…";
+    try {
+      await invoke("set_preferences", {
+        preferences: { ...preferences, shortcuts: editedShortcuts() },
+      });
+      preferencesDirty = false;
+      const data = await loadPreferences();
+      if (data) hotkeyStatus.textContent = Object.keys(data.conflicts || {}).length
+        ? "可用快捷键已保存；冲突键位已留空，请重新设置。" : "已保存，立即生效";
+    } catch (error) {
+      hotkeyStatus.textContent = String(error);
+    } finally {
+      saving = false;
+      hotkeys.querySelectorAll("input, button").forEach((node) => { node.disabled = false; });
+    }
+  }, true);
   hotkeySave.id = "hotkey-save";
-  hotkeys.append(
-    el("div", { class: "field ai-actions" }, hotkeyStatus, hotkeySave),
+  hotkeys.append(el("div", { class: "field ai-actions" }, hotkeyStatus, hotkeySave));
+  $("view-hotkeys").querySelector(".group").before(
+    el("p", { id: "hotkey-hint", class: "rule-hint" }), hotkeys,
   );
-  $("view-hotkeys")
-    .querySelector(".group")
-    .before(
-      el("p", {
-        id: "hotkey-hint",
-        class: "rule-hint",
-        text: "输入组合键，例如 Alt+A、Ctrl+Shift+D；macOS 的 Command 写作 Super。留空禁用。冲突时保留原设置。",
-      }),
-      hotkeys,
-    );
   async function loadPreferences() {
     try {
       const data = await window.LucasPreferences.refresh();
       preferences = data.preferences;
       desktopManaged = !!data.desktop_managed;
-      hotkeys.hidden = desktopManaged;
+      document.body.classList.toggle("omarchy", desktopManaged);
       $("hotkey-hint").textContent = desktopManaged
-        ? "Omarchy / Hyprland 快捷键由桌面管理。请在 ~/.config/hypr/lucas-translate.lua 中修改，执行 hyprctl reload 和 hyprctl configerrors 检查。随包默认绑定为 Super+Ctrl+Shift+T / D / S / C（显示、划词、截图翻译、截图取字）；自定义绑定以桌面配置为准。"
-        : "输入组合键，例如 Alt+A、Ctrl+Shift+D；macOS 的 Command 写作 Super。留空禁用。冲突时保留原设置。";
+        ? "点击输入框，等待录入保护开启后按下组合键；也可输入或粘贴组合键文字。✓ 表示未发现桌面冲突，× 表示冲突，悬停可查看原因；应用内部快捷键无法自动检测。留空禁用，保存后生效。"
+        : "输入组合键，例如 Alt+A、Ctrl+Shift+D；macOS 的 Command 写作 Super。留空禁用。保存时检查系统占用。";
       if (!fontDirty) font.value = String(preferences.font_size);
-      for (const action of Object.keys(labels))
-        $("hotkey-" + action).value = preferences.shortcuts[action] || "";
-      hotkeyStatus.textContent = data.warnings.join("；");
-      fontSave.disabled = false;
-      hotkeySave.disabled = desktopManaged;
-    } catch (_) {
-      hotkeyStatus.textContent = "读取失败，重新进入此页可重试";
+      for (const action of Object.keys(labels)) {
+        $("hotkey-field-" + action).hidden = !actions().includes(action);
+        if (!preferencesDirty) $("hotkey-" + action).value = preferences.shortcuts[action] || "";
+      }
+      if (!saving) hotkeys.querySelectorAll("input, button").forEach((node) => { node.disabled = false; });
+      showConflicts(data.conflicts);
+      hotkeyStatus.textContent = Object.keys(data.conflicts || {}).length ? "请重新设置标记 × 的快捷键" : "";
+      fontSave.disabled = hotkeySave.disabled = false;
+      return data;
+    } catch (error) {
+      hotkeyStatus.textContent = "读取失败：" + error;
       fontStatus.textContent = "设置暂时无法读取";
+      return null;
     }
   }
   fontSave.disabled = hotkeySave.disabled = true;
   loadPreferences();
-  document
-    .querySelector('[data-view="hotkeys"]')
-    .addEventListener("click", () => {
-      if (!preferencesDirty && !saving) loadPreferences();
-    });
-  document
-    .querySelector('[data-view="general"]')
-    .addEventListener("click", () => {
-      if (!preferences && !saving) loadPreferences();
-    });
+  document.querySelector('[data-view="hotkeys"]').addEventListener("click", () => {
+    if (!preferencesDirty && !saving) loadPreferences();
+  });
+  document.querySelector('[data-view="general"]').addEventListener("click", () => {
+    if (!preferences && !saving) loadPreferences();
+  });
 
   let available = null;
   const updateStatus = status("update-status");
