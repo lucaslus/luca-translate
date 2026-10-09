@@ -10,21 +10,24 @@ Ui.BorderSurface {
     required property var card
     required property var service
     implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
-    padding: Style.spacing.panelPadding
+    padding: Style.spacing.sm
     radius: Style.cornerRadius
-    color: Style.normalFillFor(Color.popups.text, Color.accent)
-    borderSpec: Border.controlSpec("normal", Color.popups.text, Color.accent)
+    color: "transparent"
+    borderSpec: Border.none()
 
     ColumnLayout {
         id: content
         x: root.contentLeftInset; y: root.contentTopInset
         width: root.width - root.contentLeftInset - root.contentRightInset
-        spacing: Style.spacing.md
+        spacing: Style.spacing.sm
+        Ui.PanelSeparator { Layout.fillWidth: true; foreground: Color.popups.text }
         RowLayout {
             Layout.fillWidth: true
-            NativeText { text: root.card.service; font.bold: true; Layout.fillWidth: true }
-            NativeText { visible: !!root.card.pending; text: root.service.tr("loading"); color: Color.muted; font.pixelSize: Style.font.caption }
-            Ui.Button {
+            spacing: Style.spacing.sm
+            ProviderIcon { objectName: "providerIcon." + root.card.service; provider: root.card.service }
+            NativeText { text: Model.providerLabel(root.card.service, root.service.language); font.bold: true; Layout.fillWidth: true }
+            NativeLoadingIcon { objectName: "loading." + root.card.service; visible: !!root.card.pending; label: root.service.tr("loading") }
+            Ui.Button { foreground: Color.popups.text;
                 objectName: "retry." + root.card.service
                 visible: !!root.card.error
                 text: root.service.tr("retry"); focusable: true; enabled: !root.service.busy
@@ -48,7 +51,7 @@ Ui.BorderSurface {
                     {label:"UK", phonetic:root.card.dict.uk_phonetic, url:root.card.dict.uk_speech},
                     {label:"US", phonetic:root.card.dict.us_phonetic, url:root.card.dict.us_speech}
                 ].filter(function(value) { return !!value.phonetic }) : []
-                Ui.Button {
+                Ui.Button { foreground: Color.popups.text;
                     required property var modelData
                     text: modelData.label + " /" + modelData.phonetic + "/"
                     focusable: true; enabled: !!modelData.url
@@ -66,7 +69,7 @@ Ui.BorderSurface {
         }
         NativeArea {
             objectName: "resultText." + root.card.service
-            visible: !!text && !root.card.pending
+            visible: !!text && !root.card.pending && !Model.repeatsDictionary(root.card)
             text: Model.translated(root.card)
             readOnly: true
             padding: 0
@@ -75,8 +78,8 @@ Ui.BorderSurface {
             implicitHeight: contentHeight
         }
         NativeText {
-            visible: !!root.card.pinyin
-            text: root.card.pinyin || ""; color: Color.muted; font.pixelSize: Style.font.caption
+            visible: !!root.card.pinyin && !(root.card.dict && (root.card.dict.uk_phonetic || root.card.dict.us_phonetic))
+            text: root.card.pinyin || ""; secondary: true; font.pixelSize: Style.font.caption
             Layout.fillWidth: true
         }
         Flow {
@@ -84,7 +87,7 @@ Ui.BorderSurface {
             spacing: Style.spacing.sm; Layout.fillWidth: true
             Repeater {
                 model: root.card.dictionary_help ? root.card.dictionary_help.suggestions || [] : []
-                Ui.Button {
+                Ui.Button { foreground: Color.popups.text;
                     required property string modelData
                     text: modelData; focusable: true
                     onClicked: root.service.translate(modelData)
@@ -96,10 +99,10 @@ Ui.BorderSurface {
             Layout.fillWidth: true
             NativeText {
                 text: (root.card.detected_from || "") + " → " + (root.card.detected_to || "")
-                font.pixelSize: Style.font.caption; color: Color.muted; Layout.fillWidth: true
+                font.pixelSize: Style.font.caption; secondary: true; Layout.fillWidth: true
             }
-            Ui.Button { objectName: "copy." + root.card.service; text: root.service.tr("copy"); focusable: true; onClicked: root.service.copy(Model.translated(root.card)) }
-            Ui.Button { objectName: "favorite." + root.card.service; text: root.service.tr("favorite"); focusable: true; onClicked: root.service.favorite(root.card) }
+            NativeIconButton { objectName: "copy." + root.card.service; name: "copy"; tooltipText: root.service.tr("copy"); onClicked: root.service.copy(Model.translated(root.card)) }
+            NativeIconButton { objectName: "favorite." + root.card.service; name: "favorites"; tooltipText: root.service.tr("favorite"); onClicked: root.service.favorite(root.card) }
         }
     }
 }

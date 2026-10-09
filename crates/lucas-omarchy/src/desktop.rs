@@ -2,51 +2,11 @@
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 static CAPTURING: AtomicBool = AtomicBool::new(false);
-static ANNOTATION: OnceLock<Mutex<Option<(String, tempfile::TempDir)>>> = OnceLock::new();
-fn annotation() -> &'static Mutex<Option<(String, tempfile::TempDir)>> {
-    ANNOTATION.get_or_init(|| Mutex::new(None))
-}
-pub fn cleanup() {
-    if let Ok(mut current) = annotation().lock() {
-        current.take();
-    }
-}
-
-pub fn discard_annotation(id: &str) -> Result<Value, String> {
-    let mut current = annotation()
-        .lock()
-        .map_err(|_| "Annotation storage unavailable")?;
-    if current.as_ref().is_some_and(|(active, _)| active == id) {
-        current.take();
-    }
-    Ok(json!({}))
-}
-
-pub async fn copy_annotation(id: &str) -> Result<Value, String> {
-    let path = {
-        let current = annotation()
-            .lock()
-            .map_err(|_| "Annotation storage unavailable")?;
-        let (_, directory) = current
-            .as_ref()
-            .filter(|(active, _)| active == id)
-            .ok_or("Annotation expired")?;
-        directory.path().join("annotated.png")
-    };
-    let bytes = std::fs::read(path).map_err(|_| "Cannot read annotated image")?;
-    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.len() > 64 * 1024 * 1024 {
-        return Err("Invalid annotated image".into());
-    }
-    clipboard(&bytes, "image/png").await?;
-    discard_annotation(id)?;
-    Ok(json!({"copied":true}))
-}
 
 async fn output(command: &mut Command, seconds: u64) -> Result<std::process::Output, String> {
     command.kill_on_drop(true).stdin(Stdio::null());
@@ -88,7 +48,7 @@ async fn clipboard(bytes: &[u8], mime: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn capture(action: &str) -> Result<Value, String> {
+pub async fn capture(action: &str, source: &Value) -> Result<Value, String> {
     if CAPTURING.swap(true, Ordering::AcqRel) {
         return Err("A capture is already running".into());
     }
@@ -100,31 +60,36 @@ pub async fn capture(action: &str) -> Result<Value, String> {
     }
     let _guard = Guard;
     if action == "selection" {
-        let mut child = Command::new("wl-paste")
-            .args(["--primary", "--no-newline", "--type", "text"])
-            .kill_on_drop(true)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| "wl-paste is unavailable".to_string())?;
-        let pipe = child.stdout.take().ok_or("Cannot read selection")?;
+        // The helper completes clipboard restoration even if Shell disconnects
+        // or the parent backend shuts down during selection acquisition.
+        let mut child =
+            Command::new(std::env::current_exe().map_err(|_| "Selection reader unavailable")?)
+                .arg("--read-selection")
+                .arg(source.to_string())
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|_| "Selection reader unavailable")?;
+        let pipe = child.stdout.take().ok_or("Cannot read current selection")?;
         let mut bytes = Vec::new();
-        let outcome = tokio::time::timeout(Duration::from_secs(2), async {
-            pipe.take(80_001).read_to_end(&mut bytes).await?;
-            if bytes.len() > 80_000 {
-                let _ = child.kill().await;
-            }
+        let status = tokio::time::timeout(Duration::from_secs(6), async {
+            pipe.take(128_001).read_to_end(&mut bytes).await?;
             child.wait().await
         })
         .await
-        .map_err(|_| "Selection read timed out")?
-        .map_err(|_| "Cannot read selection")?;
-        if !outcome.success() {
-            return Err("No PRIMARY selection; copy and paste the text instead".into());
+        .map_err(|_| "Current selection read timed out")?
+        .map_err(|_| "Cannot read current selection")?;
+        if !status.success() || bytes.len() > 128_000 {
+            return Err("Cannot read current selection".into());
         }
-        let text = String::from_utf8(bytes).map_err(|_| "Selection is not UTF-8 text")?;
-        if text.trim().is_empty() || text.chars().count() > 20_000 {
+        let reply: Value =
+            serde_json::from_slice(&bytes).map_err(|_| "Invalid current selection")?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err(error.into());
+        }
+        let text = reply["text"].as_str().unwrap_or("");
+        if text.chars().count() > 20_000 {
             return Err("Select 1–20000 characters".into());
         }
         return Ok(json!({"text":text,"action":action}));
@@ -133,6 +98,55 @@ pub async fn capture(action: &str) -> Result<Value, String> {
         return Err("Unknown capture action".into());
     }
     let temporary = tempfile::tempdir().map_err(|_| "Cannot create capture directory")?;
+    if action == "annotate" {
+        let shot = output(
+            Command::new("omarchy")
+                .args(["capture", "screenshot", "region", "save"])
+                .env("OMARCHY_SCREENSHOT_DIR", temporary.path()),
+            120,
+        )
+        .await?;
+        if !shot.status.success() {
+            return Err("System screenshot capture failed".into());
+        }
+        let selected = String::from_utf8(shot.stdout).map_err(|_| "Invalid screenshot path")?;
+        let selected = selected.trim();
+        if selected.is_empty() {
+            return Ok(json!({"cancelled":true}));
+        }
+        let path = std::fs::canonicalize(selected).map_err(|_| "Screenshot file is unavailable")?;
+        let directory = std::fs::canonicalize(temporary.path())
+            .map_err(|_| "Capture directory is unavailable")?;
+        if !path.starts_with(&directory) || !path.is_file() {
+            return Err("Invalid screenshot path".into());
+        }
+        // Editing is user-paced. Keep the image alive until the editor closes;
+        // backend shutdown drops and kills the child without leaking the file.
+        let status = Command::new("lucas-screenshot-editor")
+            .args(["--title", "Lucas Screenshot", "--filename"])
+            .arg(&path)
+            .args([
+                "--actions-on-enter",
+                "save-to-clipboard",
+                "--early-exit",
+                "--actions-on-escape",
+                "exit",
+                "--copy-command",
+                "wl-copy",
+                "--disable-notifications",
+            ])
+            .kill_on_drop(true)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map_err(|_| "lucas-screenshot-editor is unavailable")?;
+        if !status.success() {
+            return Err("Screenshot editor failed".into());
+        }
+        return Ok(json!({"action":action,"handled":true}));
+    }
     let region = output(&mut Command::new("slurp"), 120).await?;
     if !region.status.success() {
         return Ok(json!({"cancelled":true}));
@@ -149,17 +163,6 @@ pub async fn capture(action: &str) -> Result<Value, String> {
     .await?;
     if !shot.status.success() {
         return Err("Screenshot capture failed".into());
-    }
-    if action == "annotate" {
-        let id = uuid::Uuid::new_v4().to_string();
-        let output_path = temporary.path().join("annotated.png");
-        let data =
-            json!({"action":action,"annotation_id":id,"path":path,"output_path":output_path});
-        let mut current = annotation()
-            .lock()
-            .map_err(|_| "Annotation storage unavailable")?;
-        *current = Some((id, temporary));
-        return Ok(data);
     }
     let mut ocr = output(
         Command::new("tesseract")

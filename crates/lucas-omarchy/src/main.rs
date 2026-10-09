@@ -6,6 +6,7 @@ mod diagnostics;
 mod protocol;
 mod provider_guard;
 mod result_cache;
+mod selection;
 mod services;
 mod storage;
 mod translation;
@@ -140,7 +141,7 @@ async fn dispatch(request: Request, sink: EventSink, plugin: PathBuf) {
         "capture" => match string(&request.params, "action") {
             Ok(action) => {
                 let started = std::time::Instant::now();
-                let result = desktop::capture(action).await;
+                let result = desktop::capture(action, &request.params["source"]).await;
                 diagnostics::record(diagnostics::Record::new(
                     if action == "ocr" {
                         diagnostics::Event::OcrResult
@@ -155,14 +156,6 @@ async fn dispatch(request: Request, sink: EventSink, plugin: PathBuf) {
                 ));
                 result
             }
-            Err(e) => Err(e),
-        },
-        "annotation.copy" => match string(&request.params, "annotation_id") {
-            Ok(id) => desktop::copy_annotation(id).await,
-            Err(e) => Err(e),
-        },
-        "annotation.discard" => match string(&request.params, "annotation_id") {
-            Ok(id) => desktop::discard_annotation(id),
             Err(e) => Err(e),
         },
         "copy" => match string(&request.params, "text") {
@@ -219,6 +212,30 @@ async fn dispatch(request: Request, sink: EventSink, plugin: PathBuf) {
 #[tokio::main]
 async fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match arguments.as_slice() {
+        [mode] if mode == "--selection-offer" => {
+            if selection::offer().is_err() {
+                std::process::exit(1)
+            }
+            return;
+        }
+        [mode] if mode == "--restore-selection-clipboard" => {
+            if selection::restore().is_err() {
+                std::process::exit(1)
+            }
+            return;
+        }
+        [mode, source] if mode == "--read-selection" => {
+            let source: Value = serde_json::from_str(source).unwrap_or(Value::Null);
+            let result = match selection::read(&source).await {
+                Ok(text) => json!({"text":text.unwrap_or_default()}),
+                Err(error) => json!({"error":error}),
+            };
+            println!("{result}");
+            return;
+        }
+        _ => {}
+    }
     let plugin = match arguments.as_slice() {
         [mode, flag, path] if mode == "--stdio" && flag == "--plugin-dir" => PathBuf::from(path),
         [mode] if mode == "--stdio" => PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
@@ -307,5 +324,4 @@ async fn main() {
     translation::shutdown();
     commands.abort_all();
     while commands.join_next().await.is_some() {}
-    desktop::cleanup();
 }

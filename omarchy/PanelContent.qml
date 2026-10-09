@@ -9,7 +9,29 @@ Ui.BorderSurface {
     id: frame
     objectName: "nativePanel"
     required property var controller
+    readonly property real preferredHeight: controller.page !== "translate" ? Style.space(620)
+        : controller.service && (controller.service.busy || controller.service.cards.length) ? Style.space(600) : Style.space(300)
     function focusInput() { input.forceActiveFocus() }
+    function currentSelection(item) {
+        if (controller.page !== "translate") return ""
+        item = item || body
+        if (item.activeFocus && typeof item.selectedText === "string") return item.selectedText
+        for (var index=0; index<item.children.length; index++) {
+            var selected = currentSelection(item.children[index])
+            if (selected) return selected
+        }
+        return ""
+    }
+    function inputStatus() {
+        return {focused: input.activeFocus, composing: input.inputMethodComposing, length: input.length}
+    }
+    onVisibleChanged: if (visible && controller.page === "translate") Qt.callLater(frame.focusInput)
+    Connections {
+        target: frame.controller
+        function onPageChanged() {
+            if (frame.visible && frame.controller.page === "translate") Qt.callLater(frame.focusInput)
+        }
+    }
     padding: Style.spacing.panelPadding
     color: Color.popups.background
     radius: Style.cornerRadius
@@ -26,27 +48,29 @@ Ui.BorderSurface {
             anchors.fill: parent; spacing: Style.spacing.md
             RowLayout {
                 Layout.fillWidth: true
-                NativeText { text: "Lucas Translate"; font.pixelSize: Style.font.heading; font.bold: true; Layout.fillWidth: true }
-                Ui.Button { text: "×"; tooltipText: frame.controller.tr("close"); focusable: true; onClicked: frame.controller.dismiss() }
-            }
-            RowLayout {
-                visible: frame.controller.page !== "annotate"
-                Layout.fillWidth: true; spacing: Style.spacing.xs
+                spacing: Style.spacing.xs
                 Repeater {
-                    model: ["translate","history","favorites","settings"]
-                    Ui.Button {
+                    model: ["translate", "history", "favorites", "settings"]
+                    NativeIconButton {
                         required property string modelData
                         objectName: "tab." + modelData
-                        text: frame.controller.tr(modelData); selected: frame.controller.page === modelData; focusable: true
-                        Layout.fillWidth: true
-                        onClicked: frame.controller.page = modelData
+                        name: modelData; tooltipText: frame.controller.tr(modelData)
+                        Accessible.name: tooltipText
+                        selected: frame.controller.page === modelData; focusable: true
+                        foreground: Color.popups.text
+                        onClicked: {
+                            frame.controller.page = modelData
+                            if (modelData === "translate") Qt.callLater(frame.focusInput)
+                        }
                     }
                 }
+                Item { Layout.fillWidth: true }
+                NativeIconButton { objectName: "panelClose"; name: "close"; tooltipText: frame.controller.tr("close"); Accessible.name: tooltipText; foreground: Color.popups.text; focusable: true; onClicked: frame.controller.dismiss() }
             }
             RowLayout {
                 visible: !frame.controller.service || !frame.controller.service.ready
                 Layout.fillWidth: true
-                NativeText { text: frame.controller.tr("backend"); color: Color.muted; Layout.fillWidth: true }
+                NativeText { text: frame.controller.tr("backend"); secondary: true; Layout.fillWidth: true }
                 Ui.Button { text: frame.controller.tr("retry"); focusable: true; onClicked: if (frame.controller.service) frame.controller.service.reconnect() }
             }
             NativeText { visible: !!frame.controller.service && !!frame.controller.service.error; text: frame.controller.service ? frame.controller.service.error : ""; color: Color.urgent; Layout.fillWidth: true }
@@ -54,28 +78,8 @@ Ui.BorderSurface {
             ColumnLayout {
                 visible: frame.controller.page === "translate"
                 Layout.fillWidth: true; Layout.fillHeight: true; spacing: Style.spacing.md
-                RowLayout {
-                    Layout.fillWidth: true
-                    Ui.Dropdown {
-                        objectName: "sourceLanguage"
-                        label: frame.controller.tr("source"); options: Strings.languages(frame.controller.language)
-                        value: frame.controller.service ? frame.controller.service.from : "auto"; Layout.fillWidth: true
-                        onChanged: function(value) { if (frame.controller.service) { frame.controller.service.stop(); frame.controller.service.from = value } }
-                    }
-                    Ui.Button {
-                        objectName: "swapLanguages"
-                        text: "⇄"; focusable: true; enabled: !!frame.controller.service && frame.controller.service.from !== "auto" && frame.controller.service.to !== "auto"
-                        onClicked: { frame.controller.service.stop(); var from = frame.controller.service.from; frame.controller.service.from = frame.controller.service.to; frame.controller.service.to = from }
-                    }
-                    Ui.Dropdown {
-                        objectName: "targetLanguage"
-                        label: frame.controller.tr("target"); options: Strings.languages(frame.controller.language)
-                        value: frame.controller.service ? frame.controller.service.to : "auto"; Layout.fillWidth: true
-                        onChanged: function(value) { if (frame.controller.service) { frame.controller.service.stop(); frame.controller.service.to = value } }
-                    }
-                }
                 ScrollView {
-                    Layout.fillWidth: true; Layout.preferredHeight: Style.space(110)
+                    Layout.fillWidth: true; Layout.preferredHeight: Style.space(92)
                     clip: true
                     ScrollBar.vertical: NativeScrollBar {}
                     ScrollBar.horizontal: NativeScrollBar { policy: ScrollBar.AlwaysOff }
@@ -88,43 +92,80 @@ Ui.BorderSurface {
                         onTextChanged: if (frame.controller.service && frame.controller.service.text !== text) frame.controller.service.text = text
                         Keys.onPressed: function(event) {
                             if (input.submits(event)) {
-                                if (frame.controller.service) frame.controller.service.translate(input.text)
+                                if (!event.isAutoRepeat && frame.controller.service) frame.controller.service.translate(input.text)
                                 event.accepted = true
                             }
                         }
                     }
                 }
-                RowLayout {
+                Item {
+                    objectName: "translationControls"
                     Layout.fillWidth: true
-                    Ui.Button { text: frame.controller.tr("selection"); focusable: true; enabled: !!frame.controller.service && frame.controller.service.ready; onClicked: frame.controller.capture("selection") }
-                    Ui.Button { text: frame.controller.tr("screenshot"); focusable: true; enabled: !!frame.controller.service && frame.controller.service.ready; onClicked: frame.controller.capture("screenshot") }
-                    Item { Layout.fillWidth: true }
-                    Ui.Button { objectName: "clearInput"; text: frame.controller.tr("clear"); focusable: true; onClicked: if (frame.controller.service) frame.controller.service.clear() }
-                    Ui.Button {
-                        objectName: "translateSubmit"
-                        text: frame.controller.tr(frame.controller.service && frame.controller.service.busy ? "cancel" : "translate"); focusable: true; selected: true
-                        enabled: !!frame.controller.service && frame.controller.service.ready
-                        onClicked: frame.controller.service.busy ? frame.controller.service.stop() : frame.controller.service.translate(input.text)
+                    implicitHeight: Math.max(languageControls.implicitHeight, translationActions.implicitHeight)
+                    RowLayout {
+                        id: languageControls
+                        objectName: "languageControls"
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(Style.space(280), Math.max(0, parent.width - 2 * (translationActions.implicitWidth + Style.spacing.xs)))
+                        spacing: Style.spacing.xs
+                        Ui.Dropdown {
+                            objectName: "sourceLanguage"
+                            label: frame.controller.tr("source"); showLabel: false; Accessible.name: label; options: Strings.languages(frame.controller.language)
+                            value: frame.controller.service ? frame.controller.service.from : "auto"; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 1
+                            onChanged: function(value) { if (frame.controller.service) { frame.controller.service.stop(); frame.controller.service.from = value }; Qt.callLater(frame.focusInput) }
+                        }
+                        Ui.Button {
+                            objectName: "swapLanguages"
+                            text: "⇄"; focusable: true; enabled: !!frame.controller.service && frame.controller.service.from !== "auto" && frame.controller.service.to !== "auto"
+                            onClicked: { frame.controller.service.stop(); var from = frame.controller.service.from; frame.controller.service.from = frame.controller.service.to; frame.controller.service.to = from; frame.focusInput() }
+                        }
+                        Ui.Dropdown {
+                            objectName: "targetLanguage"
+                            label: frame.controller.tr("target"); showLabel: false; Accessible.name: label; options: Strings.languages(frame.controller.language)
+                            value: frame.controller.service ? frame.controller.service.to : "auto"; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 1
+                            onChanged: function(value) { if (frame.controller.service) { frame.controller.service.stop(); frame.controller.service.to = value }; Qt.callLater(frame.focusInput) }
+                        }
                     }
-                }
-                Flickable {
-                    Layout.fillWidth: true; Layout.fillHeight: true
-                    clip: true; contentHeight: results.implicitHeight; boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: NativeScrollBar {}
-                    ColumnLayout {
-                        id: results
-                        width: parent.width; spacing: Style.spacing.md
-                        NativeText { visible: !frame.controller.service || !frame.controller.service.cards.length; text: frame.controller.tr("empty"); color: Color.muted; Layout.fillWidth: true }
-                        Repeater {
-                            model: frame.controller.service ? frame.controller.service.cards : []
-                            ResultCard { required property var modelData; card: modelData; service: frame.controller.service; Layout.fillWidth: true }
+                    RowLayout {
+                        id: translationActions
+                        objectName: "translationActions"
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.spacing.xs
+                        NativeIconButton { objectName: "clearInput"; name: "clear"; tooltipText: frame.controller.tr("clear"); onClicked: { if (frame.controller.service) frame.controller.service.clear(); frame.focusInput() } }
+                        NativeIconButton {
+                            objectName: "translateSubmit"
+                            name: frame.controller.service && frame.controller.service.busy ? "stop" : "send"
+                            tooltipText: frame.controller.tr(frame.controller.service && frame.controller.service.busy ? "cancel" : "translate"); selected: true
+                            enabled: !!frame.controller.service && frame.controller.service.ready && (frame.controller.service.busy || !!input.text.trim())
+                            opacity: enabled ? 1 : 0.45
+                            onClicked: { frame.controller.service.busy ? frame.controller.service.stop() : frame.controller.service.translate(input.text); frame.focusInput() }
                         }
                     }
                 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Ui.Button { text: frame.controller.tr("ocr"); focusable: true; enabled: !!frame.controller.service && frame.controller.service.ready; onClicked: frame.controller.capture("ocr") }
-                    Ui.Button { text: frame.controller.tr("annotate"); focusable: true; enabled: !!frame.controller.service && frame.controller.service.ready; onClicked: frame.controller.capture("annotate") }
+                Item {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    clip: true
+                    Flickable {
+                        id: resultsViewport
+                        objectName: "resultsScroll"
+                        anchors.fill: parent
+                        clip: true; contentHeight: results.implicitHeight; boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: NativeScrollBar {}
+                        ColumnLayout {
+                            id: results
+                            width: parent.width; spacing: Style.spacing.md
+                            Repeater {
+                                model: frame.controller.service ? frame.controller.service.cards : []
+                                ResultCard { required property var modelData; card: modelData; service: frame.controller.service; Layout.fillWidth: true }
+                            }
+                        }
+                    }
+                    NativeScrollHint {
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                        viewport: resultsViewport; label: frame.controller.tr("moreResults")
+                    }
                 }
             }
             Records {
@@ -137,12 +178,6 @@ Ui.BorderSurface {
                 visible: !!frame.controller.service && frame.controller.page === "settings"
                 Layout.fillWidth: true; Layout.fillHeight: true
                 service: frame.controller.service
-            }
-            Annotation {
-                visible: !!frame.controller.service && frame.controller.page === "annotate"
-                Layout.fillWidth: true; Layout.fillHeight: true
-                service: frame.controller.service
-                onFinished: frame.controller.dismiss()
             }
         }
     }

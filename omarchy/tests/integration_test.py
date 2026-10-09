@@ -12,6 +12,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class Integration(unittest.TestCase):
+    def test_selection_launcher_pins_source_without_window_title(self):
+        with tempfile.TemporaryDirectory(prefix='lucas-selection-launch-') as directory:
+            tools=Path(directory)
+            source={'address':'0xabc','pid':123,'class':'chrome-test','title':'private title omitted'}
+            hyprctl=tools/'hyprctl';hyprctl.write_text('#!/usr/bin/env python3\nimport json\nprint('+repr(json.dumps(source))+')\n');hyprctl.chmod(0o755)
+            shell=tools/'omarchy-shell';shell.write_text('#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n');shell.chmod(0o755)
+            environment=dict(os.environ,PATH=str(tools)+os.pathsep+os.environ['PATH'])
+            result=subprocess.run(['bash',str(ROOT/'omarchy/scripts/launch.sh'),'--selection'],capture_output=True,text=True,env=environment,check=True)
+            arguments=json.loads(result.stdout)
+            self.assertEqual(arguments[:3],['shell','summon','lucas.translate'])
+            self.assertEqual(json.loads(arguments[3]),{'action':'selection','source':{key:source[key] for key in ['address','pid','class']}})
+
     def installer_fixture(self, failure=None, initially_installed=True):
         """Run the actual transaction with every Shell/Hyprland command intercepted."""
         spec = importlib.util.spec_from_file_location('native_installer', ROOT / 'scripts/install-omarchy-native.py')

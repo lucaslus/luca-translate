@@ -12,8 +12,11 @@ import tempfile
 import threading
 import time
 import zlib
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'omarchy/tests'))
+import selection_tools
 BINARY = Path(os.environ.get('LUCAS_NATIVE_BACKEND',ROOT / 'crates/lucas-omarchy/target/debug/lucas-translate-omarchy-backend'))
 
 
@@ -57,12 +60,15 @@ def main():
             image.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',320,240,8,2,0,0,0))
                 +chunk(b'IDAT',zlib.compress((b'\x00'+b'\xe0\xe0\xe0'*320)*240))+chunk(b'IEND',b''))
             programs={
-                'hyprctl':'print("[]")',
-                'wl-paste':'print("bridge selection")',
+                'hyprctl':selection_tools.HYPRCTL,
+                'wl-paste':selection_tools.paste('bridge selection\n'),
                 'slurp':'print("0,0 32x32")',
+                'omarchy':'import os,shutil; from pathlib import Path; p=Path(os.environ["OMARCHY_SCREENSHOT_DIR"])/"system.png"; shutil.copyfile(os.environ["NATIVE_CAPTURE_PNG"],p); print(p)',
+                'lucas-screenshot-editor':'import os,sys,shutil; from pathlib import Path; shutil.copyfile(sys.argv[sys.argv.index("--filename")+1],Path(os.environ["HOME"])/"clipboard")',
+
                 'grim':'import os,sys,shutil; shutil.copyfile(os.environ["NATIVE_CAPTURE_PNG"],sys.argv[-1])',
                 'tesseract':'print("bridge OCR")',
-                'wl-copy':'import os,sys; from pathlib import Path; Path(os.environ["HOME"],"clipboard").write_bytes(sys.stdin.buffer.read())',
+                'wl-copy':'import os,sys; from pathlib import Path; home=Path(os.environ["HOME"]); (home/"clipboard").write_bytes(sys.stdin.buffer.read()); (home/"selection-dispatched").unlink(missing_ok=True) if "--clear" in sys.argv else None',
             }
             for name,source in programs.items():
                 path=tools / name; path.write_text('#!/usr/bin/env python3\n'+source+'\n'); path.chmod(0o755)
@@ -82,7 +88,7 @@ def main():
                 passed=copied.startswith(b'\x89PNG') and struct.unpack('>II',copied[16:24])==(320,240)
             report={'passed':passed,'count':len(cases),'cases':cases,'duration_seconds':round(time.monotonic()-started,2),
                     'backend':str(BINARY),'network':'localhost fixture only','desktop_tools':'isolated executables',
-                    'copied_annotation_dimensions':[320,240] if passed else None}
+                    'copied_screenshot_dimensions':[320,240] if passed else None}
             reports=ROOT / 'dist/omarchy/test-results'; reports.mkdir(parents=True,exist_ok=True)
             (reports / 'bridge.json').write_text(json.dumps(report,indent=2)+'\n'); (reports / 'bridge.log').write_text(output)
             print(output); print(json.dumps(report,indent=2))

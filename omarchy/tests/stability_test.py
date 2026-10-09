@@ -228,12 +228,11 @@ class Stability(fixture.NativeBackend):
         self.assertFalse((self.home / 'clipboard').exists())
 
     def test_fault_selection_invalid_utf8_and_size(self):
-        self.tool('wl-paste', 'import sys; sys.stdout.buffer.write(b"\\xff")')
-        self.fail('capture', {'action': 'selection'})
-        self.tool('wl-paste', 'print("x" * 80001)')
-        self.fail('capture', {'action': 'selection'})
-        self.tool('wl-paste', 'print("   ")')
-        self.fail('capture', {'action': 'selection'})
+        for mode in ['utf8','oversize','unicode-oversize']:
+            (self.home/'selection-mode').write_text(mode)
+            self.fail('capture', {'action': 'selection'})
+        (self.home/'selection-mode').write_text('blank')
+        self.assertEqual(self.call('capture', {'action':'selection'})['text'], '')
 
     def test_fault_ocr_fallback_and_invalid_output(self):
         self.tool('tesseract', 'import sys\nif "-l" in sys.argv: raise SystemExit(1)\nprint("fallback OCR")')
@@ -249,24 +248,45 @@ class Stability(fixture.NativeBackend):
         self.assertIn('already running', next(value['error'] for value in results if not value['ok']))
         self.assertTrue(self.call('capture', {'action': 'screenshot'})['cancelled'])
 
-    def test_stress_30_annotation_replacements_remove_old_files(self):
-        previous = None
+    def test_stress_30_system_editor_sessions_clean_files(self):
         for _ in range(30):
-            value = self.call('capture', {'action': 'annotate'})
-            if previous:
-                self.assertFalse(Path(previous['path']).exists())
-                self.assertFalse(self.reply(self.send('annotation.copy', {'annotation_id': previous['annotation_id']}))['ok'])
-            previous = value
-        self.call('annotation.discard', {'annotation_id': previous['annotation_id']})
-        self.assertFalse(Path(previous['path']).exists())
+            self.assertTrue(self.call('capture', {'action':'annotate'})['handled'])
+            editor=json.loads((self.home/'editor.json').read_text())
+            self.assertFalse(Path(editor['path']).exists())
 
-    def test_fault_annotation_invalid_png_can_be_discarded(self):
-        value = self.call('capture', {'action': 'annotate'})
-        Path(value['output_path']).write_text('invalid')
-        self.fail('annotation.copy', {'annotation_id': value['annotation_id']})
-        self.assertFalse((self.home / 'clipboard').exists())
-        self.call('annotation.discard', {'annotation_id': value['annotation_id']})
-        self.assertFalse(Path(value['path']).exists())
+    def test_shutdown_closes_active_editor_and_removes_capture(self):
+        self.tool('lucas-screenshot-editor', 'import os,sys,json,time; from pathlib import Path; p=Path(sys.argv[sys.argv.index("--filename")+1]); Path(os.environ["HOME"],"editor.json").write_text(json.dumps({"pid":os.getpid(),"path":str(p)})); time.sleep(60)')
+        self.send('capture', {'action':'annotate'})
+        metadata = self.home/'editor.json'
+        deadline = time.monotonic()+3
+        while not metadata.exists() and time.monotonic()<deadline:
+            time.sleep(.02)
+        self.assertTrue(metadata.exists(), 'Editor did not start')
+        editor = json.loads(metadata.read_text())
+        capture = Path(editor['path'])
+        self.assertTrue(capture.exists())
+        self.process.stdin.close()
+        self.assertEqual(self.process.wait(timeout=3), 0)
+        self.process.stdin = None
+        deadline = time.monotonic()+3
+        child = Path('/proc')/str(editor['pid'])/'stat'
+        while child.exists() and child.read_text().split(') ',1)[1][0] != 'Z' and time.monotonic()<deadline:
+            time.sleep(.02)
+        self.assertTrue(not child.exists() or child.read_text().split(') ',1)[1][0] == 'Z', 'Editor survived backend shutdown')
+        self.assertFalse(capture.parent.exists(), 'Capture directory leaked on shutdown')
+
+    def test_fault_system_editor_failure_preserves_clipboard(self):
+        self.call('copy',{'text':'retained'})
+        self.tool('lucas-screenshot-editor','raise SystemExit(1)')
+        self.fail('capture',{'action':'annotate'})
+        self.assertEqual((self.home/'clipboard').read_text(),'retained')
+        self.tool('lucas-screenshot-editor','raise SystemExit(0)')
+        self.assertTrue(self.call('capture',{'action':'annotate'})['handled'])
+
+    def test_fault_system_capture_path_outside_private_directory(self):
+        self.tool('omarchy', 'print("/etc/passwd")')
+        self.fail('capture', {'action':'annotate'})
+        self.assertFalse((self.home/'editor.json').exists())
 
     def test_fault_corrupt_database_preserves_original(self):
         path = self.home / '.local/share/lucas-translate-omarchy/lucas.db'

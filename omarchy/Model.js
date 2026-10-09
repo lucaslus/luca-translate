@@ -1,5 +1,22 @@
 .pragma library
 
+function providerBrand(provider) {
+    var name = String(provider || "").toLowerCase()
+    if (["youdao", "youdaodict", "youdaotranslate"].indexOf(name) >= 0) return "youdao"
+    if (name === "bing") return "bing"
+    if (["deepl", "deeplfree", "deeplapi", "deepl_api"].indexOf(name) >= 0) return "deepl"
+    if (["google", "googlefree"].indexOf(name) >= 0) return "google"
+    return ""
+}
+
+function providerLabel(provider, language) {
+    var brand = providerBrand(provider)
+    if (brand === "youdao") return String(language || "").indexOf("zh") === 0 ? "有道" : "Youdao"
+    if (brand === "deepl") return ["DeepLApi", "deepl_api"].indexOf(provider) >= 0 ? "DeepL API" : "DeepL"
+    if (brand === "google") return "Google"
+    return provider
+}
+
 function start(cards, services, only) {
     var next = only ? cards.filter(function(card) { return card.service !== only }) : []
     services.forEach(function(service) {
@@ -26,6 +43,12 @@ function finish(cards, message) {
 }
 
 function translated(card) { return (card.paragraphs || []).join("\n") }
+
+function repeatsDictionary(card) {
+    if (!card.dict || !card.dict.meanings || !card.dict.meanings.length) return false
+    function normalize(value) { return value.replace(/\s+/g, " ").trim() }
+    return normalize(translated(card)) === normalize(card.dict.meanings.map(function(meaning) { return meaning.join(" ") }).join("\n"))
+}
 
 function key(event) {
     // The compositor manages shortcuts; the editor accepts explicit combinations.

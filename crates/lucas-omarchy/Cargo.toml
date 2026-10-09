@@ -16,3 +16,5 @@ rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "io-std", "signal"] }
 tokio-util = "0.7"
+zbus = { version = "4.4", default-features = false, features = ["tokio"] }
+wl-clipboard-rs = "=0.9.3"

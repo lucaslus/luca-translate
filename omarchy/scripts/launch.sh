@@ -12,4 +12,8 @@ case "${1:---show}" in
   --annotate) action=annotate ;;
   *) echo 'Usage: lucas-translate-native [--show|--hide|--toggle|--input|--selection|--screenshot|--ocr|--annotate]' >&2; exit 2 ;;
 esac
+if [[ $action == selection ]]; then
+  source_window=$(hyprctl -j activewindow | jq -c '{address, pid, class}') || source_window=null
+  exec omarchy-shell shell summon lucas.translate "{\"action\":\"selection\",\"source\":$source_window}"
+fi
 exec omarchy-shell shell summon lucas.translate "{\"action\":\"$action\"}"

@@ -107,9 +107,9 @@ for line in sys.stdin:
         favorites = [row for row in favorites if row['id'] != params['id']]; reply(identity,{})
     elif method == 'capture':
         if mode == 'cancel_capture': reply(identity,{'cancelled':True})
+        elif mode == 'empty_selection' and params['action'] == 'selection': reply(identity,{'action':'selection','text':''})
         elif params['action'] == 'ocr': reply(identity,{'copied':True})
-        elif params['action'] == 'annotate':
-            reply(identity,{'annotation_id':'fixture-image','path':os.environ['NATIVE_TEST_IMAGE'],'output_path':os.environ['NATIVE_TEST_OUTPUT']})
+        elif params['action'] == 'annotate': reply(identity,{'action':'annotate','handled':True})
         else: reply(identity,{'text':'captured fixture'})
     elif method == 'diagnostics':
         reply(identity,{'available':True,'write_failed':False,'dropped_events':0})

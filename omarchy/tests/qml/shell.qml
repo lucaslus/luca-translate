@@ -48,13 +48,12 @@ ShellRoot {
                 panel.service = root.service
                 panel.open("{}"); root.check(panel.opened, "Panel did not open")
                 panel.open("null"); panel.open("[]")
+                var originalInput = root.service.text
+                root.service.text="old query"
+                panel.open(JSON.stringify({action:"selection",source:{address:"0x123",pid:1}}))
+                root.check(panel.opened && root.service.text==="" && !root.service.captureBusy, "Selection inside open panel read the underlying window")
+                root.service.text = originalInput
                 panel.close(); root.check(!panel.opened, "Panel did not close")
-                panel.open('{"action":"annotate-ready"}'); panel.close(); panel.open("{}")
-                root.check(panel.page === "translate", "Reopening after annotation left an empty editor")
-                root.service.annotation = {annotation_id:"expired",path:"",output_path:""}
-                panel.page = "annotate"; root.service.annotation = null
-                root.check(panel.page === "translate", "Expired annotation left an empty page")
-                panel.close()
                 root.service.busy = true; panel.open("{}"); panel.handleEscape()
                 root.check(!panel.opened && !root.service.busy, "Escape did not stop translation and hide the panel")
                 root.service.requestId = "active"; root.service.busy = true

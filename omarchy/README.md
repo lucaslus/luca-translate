@@ -9,6 +9,21 @@ The interface binds to the installed Shell's `qs.Commons.Color`, `Style` and
 selector or stored native theme preference. Theme changes update the open panel
 without replacing its input, results or running requests. Fonts, spacing and
 surface styling follow the Shell's effective settings, including user overrides.
+The compact panel is 440 logical pixels wide at the default Shell scale, with
+a short empty state that expands for results. The title-free toolbar uses uniform vector icons for history, favorites and
+settings, with named navigation tooltips; result sections use separators rather than nested
+boxes, and duplicate dictionary paragraphs are displayed once while remaining
+available for copy and favorites. Copy and favorite actions use icon buttons with
+tooltips; saved favorites show a filled star. An overflow fade and downward icon
+appear only while additional translations remain below the viewport; clicking the
+icon advances the results and reaching the bottom hides it. Settings use compact
+switches with provider toggles arranged in two columns. Secondary text retains
+the theme's muted color when readable, otherwise
+blending it toward the theme's popup text to reach 4.5:1 contrast when that text
+color supports it. This also covers input placeholders and metadata. Language controls and the Clear/Translate icons share one row between
+the input and results; Translate becomes a stop icon while a request is running. Capture actions use their existing desktop shortcuts without
+adding buttons to the translation panel. AI and DeepL API forms appear only when
+their switches are enabled.
 
 ## Runtime requirements
 
@@ -18,13 +33,16 @@ surface styling follow the Shell's effective settings, including user overrides.
 - `python`, `wl-clipboard`, `grim`, `slurp`, `tesseract`,
   `tesseract-data-eng`, `tesseract-data-chi_sim`.
 - An unlocked Secret Service for API keys; keys never enter IPC read responses.
-- `mpv` for dictionary pronunciation.
+- `mpv` for dictionary pronunciation; `omarchy` and `lucas-screenshot-editor`
+  for the existing system screenshot/edit workflow.
 
 ## Install from this source checkout
 
 Unlock the desktop before installing or updating the plugin. The locally
 installed Shell can abort when plugin changes reload a locked session; the
 installer checks the lock IPC before modifying files.
+If an installed Shell retains cached QML after an update, run
+`omarchy restart shell` while the desktop is unlocked to load the new components.
 
 From the repository root:
 
@@ -74,14 +92,34 @@ lucas-translate-native --annotate
 ```
 
 `Enter` translates the input; `Shift+Enter` adds a newline. Escape cancels an
-active translation and hides the panel. Outside-click or Close hides it while
+active translation and hides the panel. Input focus is restored on opening,
+returning to Translate, selecting a language, submitting or clearing input.
+An Enter used to confirm an active input-method composition remains available
+to the input method; press Enter again after the text is committed. Holding Enter
+does not repeatedly restart translations. The command
+`omarchy-shell shell call lucas.translate health input` reports only focus,
+composition and text length for diagnosing input, without exposing the query.
+Outside-click or Close hides it while
 retaining its input and allowing translation to finish. OCR-to-clipboard
 does not open the panel or invoke translation. Cancelling a region capture
-leaves the clipboard unchanged. Annotation runs inside the plugin with pen,
-arrow, rectangle, circle, text and undo tools; exporting copies a PNG at the
-original capture resolution. Escape, outside-click or Cancel discards it.
-Temporary images are removed on copy, discard or backend exit. Selection capture requires the source application
-to publish a PRIMARY selection; otherwise copy and paste manually.
+leaves the clipboard unchanged. Screenshot annotation reuses the previous system flow: Omarchy's region picker
+and the installed `lucas-screenshot-editor`. Enter confirms to the clipboard and
+closes; Escape, Cancel or outside-click discards the image. The editor retains its
+existing save controls. Capture files are private and removed when the editor
+closes, including cancellation and failures. Editing has no forced time limit.
+Backend shutdown kills the editor and removes temporary files.
+Selection capture requires the source application
+to expose its live selection via accessibility or respond to its Copy shortcut.
+The selection action pins the focused window at invocation, clears old results,
+and opens an empty input panel when no selection is available. It never uses a
+persisted PRIMARY offer or existing clipboard text as a query. Accessibility
+reads leave the clipboard untouched; the Copy fallback accepts only a new offer
+and restores all original clipboard MIME formats before translating. Terminals
+use Ctrl+Shift+C. Editors known to copy a whole line without a selection require
+accessibility; otherwise the action opens empty input.
+Copy fallback recognizes native app IDs and executable names, including Feishu
+windows with an empty app ID. Synthetic Copy uses Omarchy's explicit key-down
+and delayed key-up sequence.
 
 Settings includes service toggles, language routing, local/OpenAI-compatible AI,
 DeepL API with a saved-key connection test, interface language, editable ordered
@@ -150,10 +188,9 @@ JSON reports and logs are saved under `dist/omarchy/test-results`.
 
 Stability checks exercise malformed transport/provider responses, rate limits,
 overload, cancellation, process shutdown, concurrent configuration writes,
-annotation ownership/cleanup, bounded memory/file-descriptor use, repeated
-theme changes and panel lifecycles. Missing command replies time out, pending
-UI requests are bounded, and an expired annotation is cleared after backend
-exit. Installer tests intercept all desktop commands and verify restoration
+system editor confirm/cancel/failure/cleanup, bounded memory/file-descriptor use, repeated
+theme changes and panel lifecycles. Missing noninteractive command replies time out, pending
+UI requests are bounded, and pending capture state is released after backend exit. Installer tests intercept all desktop commands and verify restoration
 after validation, discovery, enablement, shortcut and final-state failures.
 
 These tests do not establish interactive Wayland focus, real region selection,

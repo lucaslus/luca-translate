@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import selection_tools
 
 ROOT = Path(__file__).resolve().parents[2]
 BINARY = Path(os.environ.get('LUCAS_NATIVE_BACKEND', ROOT / 'crates/lucas-omarchy/target/debug/lucas-translate-omarchy-backend'))
@@ -43,17 +44,21 @@ class NativeBackend(unittest.TestCase):
         tools = self.home / 'bin'
         tools.mkdir()
         programs = {
-            'wl-paste': 'print("selected text")',
+            'wl-paste': selection_tools.paste('selected text\n'),
+            'hyprctl': selection_tools.HYPRCTL,
             'slurp': 'print("0,0 32x32")',
+            'omarchy': 'import os,sys; from pathlib import Path; p=Path(os.environ["OMARCHY_SCREENSHOT_DIR"])/"system.png"; p.write_bytes(b"system-image"); print(p)',
+            'lucas-screenshot-editor': 'import os,sys,json; from pathlib import Path; p=Path(sys.argv[sys.argv.index("--filename")+1]); Path(os.environ["HOME"],"editor.json").write_text(json.dumps({"args":sys.argv[1:],"path":str(p)})); Path(os.environ["HOME"],"clipboard").write_bytes(p.read_bytes())',
+
             'grim': 'from pathlib import Path; import sys; Path(sys.argv[-1]).write_bytes(b"test-image")',
             'tesseract': 'print("recognized text")',
-            'wl-copy': 'from pathlib import Path; import os,sys; Path(os.environ["HOME"],"clipboard").write_bytes(sys.stdin.buffer.read())',
+            'wl-copy': 'from pathlib import Path; import os,sys; home=Path(os.environ["HOME"]); (home/"clipboard").write_bytes(sys.stdin.buffer.read()); (home/"selection-dispatched").unlink(missing_ok=True) if "--clear" in sys.argv else None',
         }
         for name, source in programs.items():
             path = tools / name
             path.write_text('#!/usr/bin/env python3\n' + source + '\n')
             path.chmod(0o755)
-        environment = {**os.environ, 'HOME': str(self.home), 'PATH': str(tools) + os.pathsep + os.environ['PATH']}
+        environment = {**os.environ, 'HOME': str(self.home), 'PATH': str(tools) + os.pathsep + os.environ['PATH'], 'DBUS_SESSION_BUS_ADDRESS':'unix:path=/missing-native-test-bus', 'WAYLAND_DISPLAY':'missing-native-test-wayland'}
         for name in ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME']:
             environment.pop(name, None)
         self.process = subprocess.Popen([str(BINARY), '--stdio', '--plugin-dir', str(ROOT / 'omarchy')],
@@ -152,36 +157,72 @@ class NativeBackend(unittest.TestCase):
         self.assertEqual((self.home / 'clipboard').read_text(), 'recognized text\n')
         self.assertEqual(self.call('history.list'), [])
 
+    def test_no_current_selection_never_reuses_clipboard(self):
+        (self.home/'selection-mode').write_text('none')
+        (self.home/'clipboard').write_text('retained clipboard')
+        self.assertEqual(self.call('capture', {'action':'selection'})['text'], '')
+        self.assertEqual((self.home/'clipboard').read_text(), 'retained clipboard')
+
+    def test_blank_current_selection_opens_empty_input(self):
+        (self.home/'selection-mode').write_text('blank')
+        self.assertEqual(self.call('capture', {'action':'selection'})['text'], '')
+
+    def test_source_window_change_aborts_before_copy(self):
+        source={'address':'0xdef','pid':2000000,'class':'chromium'}
+        self.assertEqual(self.call('capture', {'action':'selection','source':source})['text'], '')
+        self.assertFalse((self.home/'selection-dispatched').exists())
+
+    def test_terminal_uses_copy_not_interrupt(self):
+        (self.home/'selection-window.json').write_text(json.dumps({'address':'0xabc','pid':2000000,'class':'com.mitchellh.ghostty'}))
+        self.assertEqual(self.call('capture', {'action':'selection'})['text'], 'selected text\n')
+        self.assertIn('CTRL+SHIFT', (self.home/'selection-dispatch-log').read_text())
+
+    def test_actual_desktop_app_ids_copy_with_explicit_key_release(self):
+        for application in ['chatgpt', 'feishu', 'com.google.Chrome']:
+            with self.subTest(application=application):
+                (self.home/'selection-window.json').write_text(json.dumps({'address':'0xabc','pid':2000000,'class':application}))
+                self.assertEqual(self.call('capture', {'action':'selection'})['text'], 'selected text\n')
+                dispatch=(self.home/'selection-dispatch-log').read_text()
+                self.assertIn('send_key_state', dispatch)
+                self.assertIn('state = "down"', dispatch)
+                self.assertIn('state = "up"', dispatch)
+                self.assertIn('address:0xabc', dispatch)
+
+    def test_editor_without_accessibility_does_not_copy_current_line(self):
+        (self.home/'selection-window.json').write_text(json.dumps({'address':'0xabc','pid':2000000,'class':'Code'}))
+        self.assertEqual(self.call('capture', {'action':'selection'})['text'], '')
+        self.assertFalse((self.home/'selection-dispatched').exists())
+
     def test_capture_cancellation_does_not_modify_clipboard(self):
         (self.home / 'bin/slurp').write_text('#!/usr/bin/env python3\nraise SystemExit(1)\n')
         result = self.call('capture', {'action': 'screenshot'})
         self.assertTrue(result['cancelled'])
         self.assertFalse((self.home / 'clipboard').exists())
 
-    def test_native_annotation_is_scoped_and_discard_preserves_clipboard(self):
-        annotation = self.call('capture', {'action': 'annotate'})
-        image = Path(annotation['path'])
-        self.assertTrue(image.exists())
-        self.assertFalse((self.home / 'clipboard').exists())
-        self.assertFalse(self.reply(self.send('annotation.copy', {'annotation_id': 'unowned'}))['ok'])
-        output = Path(annotation['output_path'])
-        output.write_bytes(b'\x89PNG\r\n\x1a\n' + b'synthetic-png-data')
-        self.call('annotation.copy', {'annotation_id': annotation['annotation_id']})
-        self.assertTrue((self.home / 'clipboard').read_bytes().startswith(b'\x89PNG'))
-        self.assertFalse(image.exists())
-        another = self.call('capture', {'action': 'annotate'})
-        old_clipboard = (self.home / 'clipboard').read_bytes()
-        self.call('annotation.discard', {'annotation_id': another['annotation_id']})
-        self.assertFalse(Path(another['path']).exists())
-        self.assertEqual((self.home / 'clipboard').read_bytes(), old_clipboard)
+    def test_system_editor_uses_old_confirm_cancel_contract(self):
+        result = self.call('capture', {'action':'annotate'})
+        self.assertEqual(result, {'action':'annotate','handled':True})
+        editor = json.loads((self.home/'editor.json').read_text())
+        args = editor['args']
+        for option, value in [('--title','Lucas Screenshot'),('--actions-on-enter','save-to-clipboard'),('--actions-on-escape','exit'),('--copy-command','wl-copy')]:
+            self.assertEqual(args[args.index(option)+1], value)
+        self.assertIn('--early-exit',args)
+        self.assertEqual((self.home/'clipboard').read_bytes(),b'system-image')
+        self.assertFalse(Path(editor['path']).exists())
 
-    def test_process_exit_removes_temporary_annotation(self):
-        annotation = self.call('capture', {'action': 'annotate'})
-        image = Path(annotation['path'])
-        self.assertTrue(image.exists())
-        self.process.terminate()
-        self.process.wait(timeout=5)
-        self.assertFalse(image.exists())
+    def test_system_editor_cancel_keeps_clipboard(self):
+        self.call('copy',{'text':'retained'})
+        editor = self.home/'bin/lucas-screenshot-editor'
+        editor.write_text('#!/usr/bin/env python3\nraise SystemExit(0)\n')
+        self.assertTrue(self.call('capture',{'action':'annotate'})['handled'])
+        self.assertEqual((self.home/'clipboard').read_text(),'retained')
+
+    def test_system_picker_cancel_does_not_open_editor(self):
+        picker = self.home/'bin/omarchy'
+        picker.write_text('#!/usr/bin/env python3\nraise SystemExit(0)\n')
+        self.assertTrue(self.call('capture',{'action':'annotate'})['cancelled'])
+        self.assertFalse((self.home/'editor.json').exists())
+        self.assertFalse((self.home/'clipboard').exists())
 
 
 if __name__ == '__main__':

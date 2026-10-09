@@ -13,6 +13,7 @@ Item {
     property bool opened: false
     property string page: "translate"
     property string captureAction: ""
+    property var captureSource: null
     property bool windowsEnabled: true
     readonly property string language: service ? service.language : "en"
     function tr(key) { return Strings.text(key, language) }
@@ -22,35 +23,36 @@ Item {
         try { payload = JSON.parse(payloadJson || "{}") } catch (_) {}
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) payload = ({})
         var action = payload.action || "show"
+        if (action === "selection" && opened && service) {
+            var selected = frame.currentSelection()
+            service.clear(); page = "translate"
+            if (selected.trim()) service.translate(selected)
+            Qt.callLater(frame.focusInput)
+            return
+        }
         if (["selection","screenshot","ocr","annotate"].indexOf(action) >= 0) {
-            close(); captureAction = action; captureTimer.restart(); return
+            close(); captureAction = action; captureSource = payload.source || null; captureTimer.restart(); return
         }
         if (action === "input" && service) service.clear()
-        if (action === "annotate-ready") page = "annotate"
-        else if (action !== "show") page = "translate"
+        if (action !== "show") page = "translate"
         opened = true
         Qt.callLater(function() { if (page === "translate") frame.focusInput() })
     }
     function close() {
-        if (page === "annotate") {
-            if (service && service.annotation) service.discardAnnotation()
-            page = "translate"
-        }
         opened = false
     }
-    function health(arg) { return service && service.ready ? "ready" : "starting" }
+    function health(arg) {
+        if (arg === "input") return JSON.stringify(frame.inputStatus())
+        return service && service.ready ? "ready" : "starting"
+    }
     function dismiss() { close(); if (shell) shell.hide("lucas.translate") }
     function handleEscape() { if (service && service.busy) service.stop(); dismiss() }
-    function capture(action) { dismiss(); captureAction = action; captureTimer.restart() }
-    Connections {
-        target: root.service
-        function onAnnotationChanged() { if (root.page === "annotate" && !root.service.annotation) root.page = "translate" }
-    }
+    function capture(action) { dismiss(); captureAction = action; captureSource = null; captureTimer.restart() }
     Timer {
         id: captureTimer
         interval: 180
         onTriggered: {
-            if (root.service && root.service.ready) root.service.capture(root.captureAction)
+            if (root.service && root.service.ready) root.service.capture(root.captureAction, root.captureSource)
             else { root.opened = true; if (root.service) root.service.error = root.tr("backendFailed") }
         }
     }
@@ -65,6 +67,7 @@ Item {
         WlrLayershell.namespace: "lucas-translate-native"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+        onVisibleChanged: if (visible) Qt.callLater(function() { if (root.page === "translate") frame.focusInput() })
 
         Rectangle { anchors.fill: parent; color: Color.menu.scrim }
         MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
@@ -72,8 +75,8 @@ Item {
             id: frame
             controller: root
             anchors.centerIn: parent
-            width: Math.min(Style.space(560), window.width - Style.gapsOut * 2)
-            height: Math.min(Style.space(740), window.height - Style.gapsOut * 2)
+            width: Math.min(Style.space(440), window.width - Style.gapsOut * 2)
+            height: Math.min(frame.preferredHeight, window.height - Style.gapsOut * 2)
         }
     }
 }

@@ -9,12 +9,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install backend build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config dbus wl-clipboard
       - run: cargo fmt --manifest-path crates/lucas-omarchy/Cargo.toml -- --check
       - run: cargo test --manifest-path crates/lucas-omarchy/Cargo.toml --locked
       - run: cargo build --manifest-path crates/lucas-omarchy/Cargo.toml --locked
       - run: python3 omarchy/tests/backend_test.py
       - run: python3 -B omarchy/tests/stability_test.py
+      - name: Private Wayland clipboard regression tests
+        run: python3 -B omarchy/tests/selection_wayland_test.py
       - run: python3 omarchy/tests/shortcuts_test.py
       - run: python3 -B omarchy/tests/integration_test.py
       - name: Build independent native backend

@@ -21,7 +21,6 @@ QtObject {
     property string retryService: ""
     property var cards: []
     property var detection: ({})
-    property var annotation: null
     property var settings: ({})
     property var shortcuts: ({shortcuts:{}, conflicts:{}})
     property var pending: ({})
@@ -48,9 +47,9 @@ QtObject {
         }
         var id = "native-" + Date.now() + "-" + (++sequence)
         var callbacks = Object.assign({}, pending)
-        var timeout = method === "capture" ? 170000
+        var timeout = method === "capture" ? (params && params.action === "annotate" ? 0 : 170000)
             : (["official.test", "speak", "shortcuts.save", "shortcuts.check"].indexOf(method) >= 0 ? 30000 : commandTimeoutMs)
-        callbacks[id] = {callback:callback || function() {}, deadline:Date.now()+timeout, method:method}
+        callbacks[id] = {callback:callback || function() {}, deadline:timeout ? Date.now()+timeout : 0, method:method}
         pending = callbacks
         backend.write(JSON.stringify({id:id, method:method, params:params || {}}) + "\n")
         return id
@@ -76,8 +75,8 @@ QtObject {
             return object(row) && typeof row.id === "number" && typeof row.text === "string" && typeof row.result === "string" && typeof row.service === "string"
         })
         if (method === "logs.directory") return typeof value === "string"
-        if (method === "capture") return object(value) && (value.cancelled === true || value.copied === true
-            || typeof value.text === "string" || (typeof value.annotation_id === "string" && typeof value.path === "string" && typeof value.output_path === "string"))
+        if (method === "capture") return object(value) && (value.cancelled === true || value.copied === true || value.handled === true
+            || typeof value.text === "string")
         return object(value)
     }
     function complete(id, ok, data) {
@@ -90,7 +89,7 @@ QtObject {
     function expire() {
         var now = Date.now()
         Object.keys(pending).forEach(function(id) {
-            if (pending[id] && pending[id].deadline <= now) complete(id, false, tr("timeout"))
+            if (pending[id] && pending[id].deadline && pending[id].deadline <= now) complete(id, false, tr("timeout"))
         })
         if (busy && streamDeadline && streamDeadline <= now) {
             stop(); error = tr("timeout")
@@ -172,17 +171,23 @@ QtObject {
         busy = false; requestId = ""; streamDeadline = 0
         cards = Model.finish(cards, tr("interrupted"))
     }
-    function clear() { stop(); text = ""; cards = []; detection = ({}); error = ""; notice = "" }
-    function capture(action) {
+    property int captureEpoch: 0
+    function clear() { captureEpoch++; captureBusy = false; stop(); text = ""; cards = []; detection = ({}); error = ""; notice = "" }
+    function capture(action, source) {
         if (!ready || captureBusy) return
+        if (action === "selection") clear()
+        var epoch = ++captureEpoch
         captureBusy = true; error = ""; notice = ""
-        request("capture", {action:action}, function(ok, data) {
+        request("capture", {action:action, source:source || null}, function(ok, data) {
+            if (epoch !== captureEpoch) return
             captureBusy = false
             if (ok && data.cancelled) return
-            if (ok && data.annotation_id) {
-                annotation = data
-                if (shell) shell.summon("lucas.translate", JSON.stringify({action:"annotate-ready"}))
-            } else if (ok && data.text) {
+            if (ok && action === "selection" && !data.text) {
+                clear()
+                if (shell) shell.summon("lucas.translate", JSON.stringify({action:"input"}))
+                return
+            }
+            if (ok && data.text) {
                 text = data.text
                 translate(text)
                 if (shell) shell.summon("lucas.translate", JSON.stringify({action:"captured"}))
@@ -190,18 +195,11 @@ QtObject {
             else if (!ok && shell) shell.summon("lucas.translate", JSON.stringify({action:"error"}))
         })
     }
-    function discardAnnotation() {
-        if (annotation) request("annotation.discard", {annotation_id:annotation.annotation_id})
-        annotation = null
-    }
-    function copy(value) {
-        request("copy", {text:value}, function(ok) { if (ok) notice = tr("copied") })
-    }
+    function copy(value) { request("copy", {text:value}, function(ok) { if (ok) notice = tr("copied") }) }
     function favorite(card) {
-        request("favorite.add", {text:card.text, result:Model.translated(card), service:card.service}, function(ok) { if (ok) notice = tr("saved") })
+        request("favorite.add", {text:card.text,result:Model.translated(card),service:card.service}, function(ok) { if (ok) notice = tr("saved") })
     }
     function reconnect() { failures = 0; if (!backend.running) backend.running = true }
-
     property Process backend: Process {
         command: ["bash", Qt.resolvedUrl("scripts/backend.sh").toString().replace(/^file:\/\//, "")]
         running: root.autostart
@@ -211,7 +209,7 @@ QtObject {
         stderr: SplitParser { onRead: function(line) {} }
         onExited: {
             root.ready = false; root.busy = false; root.captureBusy = false
-            root.annotation = null; root.requestId = ""; root.streamDeadline = 0
+            root.requestId = ""; root.streamDeadline = 0
             root.cards = Model.finish(root.cards, root.tr("interrupted"))
             var callbacks = root.pending; root.pending = ({})
             for (var id in callbacks) {

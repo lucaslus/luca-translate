@@ -48,11 +48,8 @@ def main():
         match = re.search(r'NATIVE_UI_PASS cases=(\d+)',output)
         failures = ['NATIVE_UI_FAIL','ReferenceError:','TypeError:','Binding loop','ERROR:','Unable to assign']
         passed = result.returncode == 0 and match is not None and len(cases) == int(match[1]) and not any(item in output for item in failures)
-        if passed:
-            dimensions = struct.unpack('>II',exported.read_bytes()[16:24])
-            passed = dimensions == (320,240)
         report = {'passed':passed,'cases':cases,'count':len(cases),'duration_seconds':round(time.monotonic()-started,2),
-                  'renderer':'offscreen Qt RHI / Mesa software OpenGL','export_dimensions':[320,240] if passed else None}
+                  'renderer':'offscreen Qt RHI / Mesa software OpenGL'}
         reports = ROOT / 'dist/omarchy/test-results'; reports.mkdir(parents=True,exist_ok=True)
         (reports / 'ui.json').write_text(json.dumps(report,indent=2)+'\n')
         (reports / 'ui.log').write_text(output)
