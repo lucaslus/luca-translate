@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 import queue
+import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import selection_tools
 
@@ -21,6 +23,18 @@ class Provider(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         text = body['messages'][-1]['content']
+        if text in ['stream fixture','broken stream fixture','slow stream fixture','limited stream fixture']:
+            self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.send_header('Connection','close'); self.end_headers()
+            try:
+                for part in ['你好','，世界']:
+                    data=('data: '+json.dumps({'choices':[{'delta':{'content':part}}]},ensure_ascii=False)+'\r\n\r\n').encode()
+                    # Deliberately split UTF-8 bytes across network chunks.
+                    self.wfile.write(data[:23]); self.wfile.flush(); time.sleep(.03)
+                    self.wfile.write(data[23:]); self.wfile.flush(); time.sleep(.08 if text!='slow stream fixture' else .5)
+                if text=='limited stream fixture': self.wfile.write(b'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'); self.wfile.flush()
+                if text!='broken stream fixture': self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush()
+            except (BrokenPipeError,ConnectionResetError): pass
+            return
         data = json.dumps({'choices': [{'message': {'content': 'translated: ' + text}}]}).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -110,6 +124,101 @@ class NativeBackend(unittest.TestCase):
         self.assertEqual(result['paragraphs'], ['translated: quotes " and', 'newlines'])
         history = self.call('history.list')
         self.assertEqual(history[0]['text'], 'quotes " and\nnewlines')
+
+    def translation(self,text):
+        identity=self.send('translate',{'text':text,'from':'en','to':'zh-Hans'})
+        events=[]
+        while True:
+            message=self.messages.get(timeout=8)
+            if message.get('event')=='translation' and message['data']['request_id']==identity:
+                events.append(message['data'])
+                if events[-1]['kind']=='done': return events
+
+    def test_streaming_is_incremental_and_utf8_safe(self):
+        events=self.translation('stream fixture')
+        self.assertTrue(any(e['kind']=='delta' for e in events))
+        result=next(e['data'] for e in events if e['kind']=='result')
+        self.assertEqual(result['paragraphs'],['你好，世界'])
+        self.assertEqual(events[-1]['kind'],'done')
+
+    def test_truncated_stream_is_failure_and_not_saved(self):
+        events=self.translation('broken stream fixture')
+        result=next(e['data'] for e in events if e['kind']=='result')
+        self.assertEqual(result['failure']['code'],'invalid_response')
+        self.assertEqual(self.call('history.list'),[])
+
+    def test_token_limit_does_not_save_partial_stream_as_success(self):
+        result=next(e['data'] for e in self.translation('limited stream fixture') if e['kind']=='result')
+        self.assertEqual(result['failure']['code'],'invalid_response')
+        self.assertEqual(self.call('history.list'),[])
+
+    def test_retention_applies_when_reading_and_preserves_favorites(self):
+        usage=self.call('settings')['usage']; usage['history_days']=7
+        self.call('usage.save',usage)
+        self.translation('recent query')
+        self.call('favorite.add',{'text':'old','result':'kept','service':'AI'})
+        database=next((self.home/'.local/share/lucas-translate-omarchy').glob('*.db'))
+        with sqlite3.connect(database) as connection:
+            connection.execute("INSERT INTO history(text,result,service,created_at) VALUES('old','expired','AI',?)",(int(time.time())-8*86400,))
+        self.assertEqual([r['text'] for r in self.call('history.list')],['recent query'])
+        self.assertEqual(self.call('favorites.list')[0]['result'],'kept')
+
+    def test_ocr_cleanup_is_opt_in(self):
+        self.assertFalse(self.call('settings')['usage']['ocr_cleanup'])
+        tool=self.home/'bin/tesseract'
+        tool.write_text('#!/usr/bin/env python3\nprint("This is a\\nwrapped sentence")\n')
+        usage=self.call('settings')['usage']; usage['ocr_cleanup']=True
+        self.call('usage.save',usage); self.call('capture',{'action':'ocr'})
+        self.assertEqual((self.home/'clipboard').read_text(),'This is a wrapped sentence')
+
+    def test_stream_cancel_stops_late_results(self):
+        identity=self.send('translate',{'text':'slow stream fixture','from':'en','to':'zh-Hans'})
+        while True:
+            message=self.messages.get(timeout=8)
+            if message.get('event')=='translation' and message['data']['kind']=='delta': break
+        self.call('cancel',{'request_id':identity})
+        time.sleep(.7)
+        late=[]
+        while not self.messages.empty(): late.append(self.messages.get_nowait())
+        self.assertFalse(any(m.get('event')=='translation' and m['data']['request_id']==identity and m['data']['kind']=='result' for m in late))
+
+    def test_usage_history_search_retention_and_disabled_storage(self):
+        usage=self.call('settings')['usage']
+        self.translation('searchable example')
+        row=self.call('history.list',{'search':'SEARCHABLE'})[0]
+        self.assertEqual(row['details'][0]['service'],'AI')
+        self.assertEqual(self.call('history.list',{'search':"' OR 1=1 --"}),[])
+        usage['history_enabled']=False
+        self.call('usage.save',usage); self.translation('not stored')
+        self.assertEqual(len(self.call('history.list')),1)
+        usage['history_enabled']=True; usage['history_limit']=1
+        self.call('usage.save',usage); self.translation('second example')
+        self.assertEqual([r['text'] for r in self.call('history.list')],['second example'])
+        invalid={**usage,'service_order':['AI']}
+        self.assertFalse(self.reply(self.send('usage.save',invalid))['ok'])
+        self.assertEqual(self.call('settings')['usage'],usage)
+
+    def test_favorite_toggle_returns_persisted_state(self):
+        params={'text':'hello','result':'你好','service':'AI'}
+        self.assertIsNone(self.call('favorite.status',params)['id'])
+        identity=self.call('favorite.toggle',params)['id']
+        self.assertEqual(self.call('favorite.status',params)['id'],identity)
+        self.assertIsNone(self.call('favorite.toggle',params)['id'])
+        self.assertEqual(self.call('favorites.list'),[])
+
+    def test_service_order_saves_only_order_and_rejects_invalid_values(self):
+        usage=self.call('settings')['usage']
+        usage.update(history_enabled=False,history_days=30,history_limit=1000,ocr_cleanup=True)
+        self.call('usage.save',usage)
+        order=list(reversed(usage['service_order']))
+        self.assertEqual(self.call('service.order',{'order':order}),{'order':order})
+        expected={**usage,'service_order':order}
+        self.assertEqual(self.call('settings')['usage'],expected)
+        document=json.loads((self.home/'.local/share/lucas-translate-omarchy/config.json').read_text())
+        self.assertEqual(document['usage'],expected)
+        for invalid in [order[:-1],['AI']*6,order+['Unknown'],['Unknown']+order[1:],'AI',None]:
+            self.assertFalse(self.reply(self.send('service.order',{'order':invalid}))['ok'])
+            self.assertEqual(self.call('settings')['usage'],expected)
 
     def test_native_preferences_reject_app_theme_and_secrets_are_not_returned(self):
         settings = self.call('settings')

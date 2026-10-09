@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod desktop;
 mod diagnostics;
+mod ocr_text;
 mod protocol;
 mod provider_guard;
 mod result_cache;
@@ -39,7 +40,7 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, String> {
 fn settings() -> Result<Value, String> {
     Ok(
         json!({"preferences":config::preferences()?,"services":config::load_services()?,
-        "routing":config::load_routing()?,"ai":config::load_ai_config()?,"official":config::official_view()?}),
+        "routing":config::load_routing()?,"ai":config::load_ai_config()?,"official":config::official_view()?,"usage":config::load_usage()?}),
     )
 }
 
@@ -67,6 +68,15 @@ fn command(request: Request) -> Result<Value, String> {
     match request.method.as_str() {
         "settings" => settings(),
         "catalog" => Ok(json!(translation::catalog())),
+        "service.order" => {
+            Ok(json!({"order":config::save_service_order(decode(p["order"].clone())?)?}))
+        }
+        "usage.save" => {
+            config::save_usage(decode(p)?)?;
+            let usage = config::load_usage()?;
+            db::prune_history(usage.history_days, usage.history_limit)?;
+            settings()
+        }
         "preferences.save" => {
             config::save_preferences(decode(p)?)?;
             settings()
@@ -91,10 +101,15 @@ fn command(request: Request) -> Result<Value, String> {
             )?;
             settings()
         }
-        "history.list" => Ok(json!(db::list_history(
-            p["limit"].as_i64().unwrap_or(50),
-            p["offset"].as_i64().unwrap_or(0)
-        )?)),
+        "history.list" => {
+            let usage = config::load_usage()?;
+            db::prune_history(usage.history_days, usage.history_limit)?;
+            Ok(json!(db::search_history(
+                p["limit"].as_i64().unwrap_or(50),
+                p["offset"].as_i64().unwrap_or(0),
+                p["search"].as_str().unwrap_or("")
+            )?))
+        }
         "favorites.list" => Ok(json!(db::list_favorites(
             p["limit"].as_i64().unwrap_or(50),
             p["offset"].as_i64().unwrap_or(0)
@@ -115,6 +130,12 @@ fn command(request: Request) -> Result<Value, String> {
             db::remove_favorite(p["id"].as_i64().ok_or("Missing id")?)?;
             Ok(json!({}))
         }
+        "favorite.status" => Ok(
+            json!({"id":db::favorite_id(string(&p,"text")?,string(&p,"result")?,string(&p,"service")?)?}),
+        ),
+        "favorite.toggle" => Ok(
+            json!({"id":db::toggle_favorite(string(&p,"text")?,string(&p,"result")?,string(&p,"service")?)?}),
+        ),
         "diagnostics" => Ok(json!(diagnostics::status())),
         "logs.directory" => Ok(json!(diagnostics::directory()?)),
         _ => Err("Unknown method".into()),

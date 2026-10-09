@@ -16,7 +16,7 @@
 - **翻译对照**：划词、输入、截图翻译，多渠道并行，失败可单独重试。
 - **截图取字**：本地离线 OCR，静默模式直接复制文字，不弹翻译窗口。
 - **自由选服务**：有道、DeepL、Bing、Google，支持 DeepL 官方 API、OpenAI 兼容服务和本地 Ollama。
-- **查词与记录**：音标及发音、中文拼音、历史与收藏；自定义快捷键、字号、窗口大小与主题。
+- **查词与记录**：音标及发音、历史与收藏；自定义快捷键、字号、窗口大小与主题。
 - **有道兜底**：词典失败或缺少音标时，使用有道网页翻译返回原文译文；仅在词典明确提供原形关系时补充原形音标。相近拼写作为可点击建议显示，不自动替换原词。网页翻译通道单次最多 5000 个 UTF-16 单元，可用性受上游影响。
 
 **隐私**：图片不上传，翻译文字仅发送给已启用的服务；静默 OCR 不调用翻译。API Key 存于系统凭据存储。免费网页通道的可用性受网络和服务商限流影响。
@@ -28,7 +28,7 @@ An **open-source Bob Translate alternative** for macOS, Windows, and Linux. Text
 - **Compare translations**: translate selected text, input, or screenshots with parallel results and per-service retries.
 - **Extract text locally**: offline OCR with a silent copy-to-clipboard mode—no translation window.
 - **Choose your services**: Youdao, DeepL, Bing, Google, the official DeepL API, and OpenAI-compatible endpoints, including local Ollama.
-- **Look up and save**: phonetics, pronunciation, Chinese pinyin, history, and favorites. Customize shortcuts, text size, window size, and theme.
+- **Look up and save**: phonetics, pronunciation, history, and favorites. Customize shortcuts, text size, window size, and theme.
 
 **Privacy**: images stay local; only text is sent to enabled translation services. Silent OCR makes no translation requests. API keys stay in the system credential store. Free web endpoints are subject to network availability and rate limits.
 

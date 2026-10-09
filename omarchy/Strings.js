@@ -1,6 +1,9 @@
 .pragma library
 
 var labels = {
+    reorder: ["Drag to reorder", "拖拽排序"],
+    removed: ["Removed", "已移除"], search: ["Search records…", "搜索记录…"], viewResults: ["View results", "查看完整结果"], collapse: ["Collapse", "收起"],
+    serviceOrder: ["Service order", "服务顺序"], historyStorage: ["Save history", "保存历史"], historyDays: ["Retention", "保留时间"], historyLimit: ["Record limit", "记录上限"], unlimited: ["Unlimited", "不限"], ocrCleanup: ["Join OCR text lines", "整理 OCR 断行"], usage: ["Usage", "使用偏好"],
     translate: ["Translate", "翻译"], settings: ["Settings", "设置"], history: ["History", "历史"],
     favorites: ["Favorites", "收藏"], close: ["Close", "关闭"], input: ["Type or paste text…", "输入或粘贴文字…"],
     source: ["Source", "原文"], target: ["Target", "译文"], auto: ["Automatic", "自动"],
@@ -56,4 +59,33 @@ function languages(language) {
         {value:"ja",label:text("japanese",language)}, {value:"ko",label:text("korean",language)},
         {value:"fr",label:text("french",language)}, {value:"de",label:text("german",language)},
         {value:"ru",label:text("russian",language)}, {value:"es",label:text("spanish",language)}]
+}
+
+function failure(code,language) {
+    var messages={
+        rate_limited:["Rate limited. Retry after the cooldown.","渠道限流，冷却结束后可重试。"],
+        timeout:["The service timed out.","渠道响应超时。"], network:["Cannot connect to this service.","暂时无法连接该渠道。"],
+        unauthorized:["Check the saved API key.","请检查已保存的 API 密钥。"], forbidden:["Check the account and service settings.","请检查账户与服务配置。"],
+        unavailable:["This service is temporarily unavailable.","渠道暂时不可用。"], invalid_request:["Shorten the text or change the language pair.","请缩短文本或调整语向。"],
+        invalid_response:["No usable translation was received.","没有收到可用译文。"], configuration:["Complete the service settings.","请补全服务配置。"],
+        unsupported:["This language pair is not supported.","该渠道不支持此语向。"], cancelled:["Translation cancelled.","翻译已取消。"], internal:["The request failed. Retry.","请求未完成，请重试。"]
+    }
+    var message=messages[code]
+    return message ? message[language==="zh-CN" ? 1 : 0] : text("unavailable",language)
+}
+function message(value,language) {
+    if (!value) return ""
+    var known={"Invalid usage settings":["Invalid usage settings","使用偏好无效"],"没有启用的翻译服务，请在偏好设置中开启并完成配置":["Enable a translation service in Settings.","请在设置中开启翻译服务。"],"翻译已完成，但历史记录保存失败":["Translation completed; history could not be saved.","翻译已完成，历史保存失败。"]}
+    if (known[value]) return known[value][language==="zh-CN" ? 1 : 0]
+    // Desktop and storage errors have safe backend messages; localize their category.
+    if (language!=="zh-CN" && /[\u3400-\u9fff]/.test(value)) return text("unavailable",language)
+    if (language==="zh-CN" && !/[\u3400-\u9fff]/.test(value)) {
+        if (/clipboard|copy|wl-copy/i.test(value)) return "复制失败，请检查剪贴板服务。"
+        if (/OCR|tesseract|recognized/i.test(value)) return "文字识别失败，请检查 OCR 语言数据。"
+        if (/capture|screenshot|region/i.test(value)) return "截图失败，请检查截图工具。"
+        if (/selection/i.test(value)) return "无法读取选区，请重试。"
+        if (/shortcut/i.test(value)) return "快捷键操作失败。"
+        return text("unavailable",language)
+    }
+    return value
 }

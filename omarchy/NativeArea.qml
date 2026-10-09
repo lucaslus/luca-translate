@@ -3,6 +3,7 @@ import QtQuick.Controls
 import qs.Commons
 import qs.Ui as Ui
 import "Theme.js" as Theme
+import "Typography.js" as Typography
 
 TextArea {
     id: root
@@ -15,7 +16,7 @@ TextArea {
     }
     textFormat: TextEdit.PlainText
     color: Color.popups.text
-    font.family: Style.font.family
+    font.family: Typography.family
     font.pixelSize: Style.font.body
     wrapMode: TextEdit.Wrap
     selectByMouse: true

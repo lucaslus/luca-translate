@@ -177,7 +177,12 @@ pub async fn capture(action: &str, source: &Value) -> Result<Value, String> {
     if !ocr.status.success() {
         return Err("Local OCR failed; check installed language data".into());
     }
-    let text = String::from_utf8(ocr.stdout).map_err(|_| "OCR returned invalid text")?;
+    let raw = String::from_utf8(ocr.stdout).map_err(|_| "OCR returned invalid text")?;
+    let text = if crate::config::load_usage()?.ocr_cleanup {
+        crate::ocr_text::clean(&raw)
+    } else {
+        raw
+    };
     if text.trim().is_empty() {
         return Err("No text was recognized".into());
     }

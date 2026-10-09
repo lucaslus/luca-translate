@@ -2,7 +2,7 @@
 //!
 //! 用户在设置面板填写 base_url / api_key / model 即可接入：
 //! DeepSeek、Kimi、智谱、通义、Ollama（本地）、OpenAI 等一切 OpenAI 兼容端点。
-//! 非流式实现（简单可靠），流式后续迭代。
+//! Supports complete responses and cancellable SSE streaming.
 
 use serde_json::{json, Value};
 
@@ -54,6 +54,78 @@ impl TranslateService for OpenAiCompat {
     }
 
     fn translate(&self, text: &str, from: &str, to: &str) -> Result<Vec<String>, ServiceError> {
+        let (req, body) = self.request(text, from, to, false)?;
+        let resp = req.send_json(&body)?;
+        let data: Value = resp.into_json()?;
+
+        let content = data
+            .pointer("/choices/0/message/content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ServiceError::Parse("AI 响应未包含文字译文".into()))?;
+
+        if content.trim().is_empty() {
+            return Err(ServiceError::Parse("AI 译文为空".into()));
+        }
+
+        Ok(content.split('\n').map(|s| s.to_string()).collect())
+    }
+    fn translate_stream(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<super::TranslationOutput, ServiceError> {
+        let (req, body) = self.request(text, from, to, true)?;
+        let mut content = String::new();
+        req.send_stream(&body, &mut |frame| {
+            if frame.trim() == "[DONE]" {
+                return Ok(true);
+            }
+            let data: Value =
+                serde_json::from_str(frame).map_err(|_| ServiceError::Parse(String::new()))?;
+            if data.get("error").is_some() {
+                return Err(ServiceError::Parse(String::new()));
+            }
+            if data
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| reason != "stop")
+            {
+                return Err(ServiceError::Parse(String::new()));
+            }
+            if let Some(value) = data
+                .pointer("/choices/0/delta/content")
+                .and_then(Value::as_str)
+            {
+                content.push_str(value);
+                on_delta(value);
+            } else if let Some(value) = data
+                .pointer("/choices/0/message/content")
+                .and_then(Value::as_str)
+            {
+                content.push_str(value);
+                on_delta(value);
+            }
+            Ok(false)
+        })?;
+        if content.trim().is_empty() {
+            return Err(ServiceError::Parse(String::new()));
+        }
+        Ok(super::TranslationOutput::paragraphs(
+            content.split('\n').map(String::from).collect(),
+        ))
+    }
+}
+
+impl OpenAiCompat {
+    fn request(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+        stream: bool,
+    ) -> Result<(crate::http::Request, Value), ServiceError> {
         if to == "auto" {
             return Err(ServiceError::Unsupported("目标语言不能是 auto".into()));
         }
@@ -88,7 +160,7 @@ impl TranslateService for OpenAiCompat {
             lang_desc(to),
         );
 
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "temperature": 0.2,
             "messages": [
@@ -97,6 +169,9 @@ impl TranslateService for OpenAiCompat {
             ]
         });
 
+        if stream {
+            body["stream"] = json!(true);
+        }
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
         let mut req = crate::http::post(&url)
             .timeout(std::time::Duration::from_secs(60))
@@ -105,19 +180,7 @@ impl TranslateService for OpenAiCompat {
             req = req.set("Authorization", &format!("Bearer {}", self.api_key.trim()));
         }
 
-        let resp = req.send_json(&body)?;
-        let data: Value = resp.into_json()?;
-
-        let content = data
-            .pointer("/choices/0/message/content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ServiceError::Parse("AI 响应未包含文字译文".into()))?;
-
-        if content.trim().is_empty() {
-            return Err(ServiceError::Parse("AI 译文为空".into()));
-        }
-
-        Ok(content.split('\n').map(|s| s.to_string()).collect())
+        Ok((req, body))
     }
 }
 

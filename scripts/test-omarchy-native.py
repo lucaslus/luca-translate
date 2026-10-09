@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='lucas-native-qml-test-') as directory:
         (root / module).symlink_to(SHELL / module, target_is_directory=True)
     source = (ROOT / 'omarchy/tests/qml/shell.qml').read_text().replace('import "../../" as Native', 'import "Native" as Native').replace('"../../" + file', '"Native/" + file')
     (root / 'shell.qml').write_text(source)
-    result = subprocess.run(['quickshell', '-p', str(root), '--no-color'], capture_output=True, text=True, timeout=25)
+    result = subprocess.run(['quickshell', '-p', str(root), '--no-color'], capture_output=True, text=True, timeout=25, env=dict(os.environ,QT_QPA_PLATFORM='offscreen',QSG_RHI_BACKEND='opengl',LIBGL_ALWAYS_SOFTWARE='1'))
     output = result.stdout + result.stderr
     print(output)
     failures = ['NATIVE_QML_FAIL', 'ReferenceError:', 'TypeError:', 'Binding loop', 'ERROR:', 'Failed to load configuration', 'Unable to assign']

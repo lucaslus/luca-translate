@@ -80,6 +80,7 @@ pub struct AiUpdate {
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Document {
+    usage: UsageConfig,
     official: OfficialDocument,
     preferences: Preferences,
     enabled: bool,
@@ -92,6 +93,72 @@ struct Document {
     services: ServiceToggles,
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UsageConfig {
+    pub service_order: Vec<String>,
+    pub history_enabled: bool,
+    pub history_days: u32,
+    pub history_limit: u32,
+    pub ocr_cleanup: bool,
+}
+impl Default for UsageConfig {
+    fn default() -> Self {
+        Self {
+            service_order: [
+                "YoudaoDict",
+                "DeepLApi",
+                "AI",
+                "Bing",
+                "DeepLFree",
+                "GoogleFree",
+            ]
+            .map(String::from)
+            .to_vec(),
+            history_enabled: true,
+            history_days: 0,
+            history_limit: 0,
+            ocr_cleanup: false,
+        }
+    }
+}
+pub fn load_usage() -> Result<UsageConfig, String> {
+    with_store(|s| Ok(s.load()?.usage))
+}
+fn valid_service_order(order: &[String]) -> bool {
+    let providers = UsageConfig::default().service_order;
+    order.len() == providers.len()
+        && providers
+            .iter()
+            .all(|p| order.iter().filter(|v| *v == p).count() == 1)
+}
+pub fn save_service_order(order: Vec<String>) -> Result<Vec<String>, String> {
+    if !valid_service_order(&order) {
+        return Err("Invalid service order".into());
+    }
+    with_store(|s| {
+        s.update(|d| {
+            d.usage.service_order = order;
+            Ok(())
+        })?;
+        Ok(s.load()?.usage.service_order)
+    })
+}
+pub fn save_usage(mut usage: UsageConfig) -> Result<(), String> {
+    if !valid_service_order(&usage.service_order)
+        || usage.history_days > 3650
+        || usage.history_limit > 10000
+    {
+        return Err("Invalid usage settings".into());
+    }
+    usage.service_order.shrink_to_fit();
+    with_store(|s| {
+        s.update(|d| {
+            d.usage = usage;
+            Ok(())
+        })
+    })
 }
 trait Secrets: Send {
     fn get(&self, id: &str) -> Result<String, String>;

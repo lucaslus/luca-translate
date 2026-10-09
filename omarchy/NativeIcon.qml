@@ -28,7 +28,12 @@ Canvas {
             c.closePath()
         }
         c.beginPath()
-        if (name === "translate") {
+        if (name === "ai") {
+            c.moveTo(12,2); c.lineTo(15,9); c.lineTo(22,12); c.lineTo(15,15)
+            c.lineTo(12,22); c.lineTo(9,15); c.lineTo(2,12); c.lineTo(9,9); c.closePath()
+        } else if (name === "drag") {
+            for (var x=8;x<=16;x+=8) for (var y=5;y<=19;y+=7) { c.moveTo(x+1,y); c.arc(x,y,1,0,Math.PI*2) }
+        } else if (name === "translate") {
             c.moveTo(2,7); c.lineTo(22,7); c.lineTo(17,2)
             c.moveTo(22,17); c.lineTo(2,17); c.lineTo(7,22)
         } else if (name === "history") {
@@ -51,6 +56,8 @@ Canvas {
             polygon(gear); c.moveTo(15.5,12); c.arc(12,12,3.5,0,Math.PI*2)
         } else if (name === "close") {
             c.moveTo(2,2); c.lineTo(22,22); c.moveTo(22,2); c.lineTo(2,22)
+        } else if (name === "check") {
+            c.moveTo(3,12); c.lineTo(9,20); c.lineTo(21,4)
         } else if (name === "copy") {
             c.rect(3,8,13,13)
             c.moveTo(8,8); c.lineTo(8,3); c.lineTo(21,3); c.lineTo(21,16); c.lineTo(16,16)

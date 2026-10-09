@@ -1,9 +1,8 @@
 import QtQuick
 import Quickshell
-import Quickshell.Wayland
-import Quickshell.Hyprland
 import qs.Commons
 import "Strings.js" as Strings
+import "BuildInfo.js" as BuildInfo
 
 Item {
     id: root
@@ -17,6 +16,7 @@ Item {
     property bool windowsEnabled: true
     readonly property string language: service ? service.language : "en"
     function tr(key) { return Strings.text(key, language) }
+    function focusInput() { if (windowLoader.item) windowLoader.item.focusInput() }
 
     function open(payloadJson) {
         var payload = ({})
@@ -24,25 +24,27 @@ Item {
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) payload = ({})
         var action = payload.action || "show"
         if (action === "selection" && opened && service) {
-            var selected = frame.currentSelection()
+            var selected = windowLoader.item ? windowLoader.item.currentSelection() : ""
             service.clear(); page = "translate"
             if (selected.trim()) service.translate(selected)
-            Qt.callLater(frame.focusInput)
+            Qt.callLater(root.focusInput)
             return
         }
         if (["selection","screenshot","ocr","annotate"].indexOf(action) >= 0) {
             close(); captureAction = action; captureSource = payload.source || null; captureTimer.restart(); return
         }
         if (action === "input" && service) service.clear()
-        if (action !== "show") page = "translate"
+        if (action === "settings") page = "settings"
+        else if (action !== "show") page = "translate"
         opened = true
-        Qt.callLater(function() { if (page === "translate") frame.focusInput() })
+        Qt.callLater(function() { if (page === "translate") root.focusInput() })
     }
     function close() {
         opened = false
     }
     function health(arg) {
-        if (arg === "input") return JSON.stringify(frame.inputStatus())
+        if (arg === "revision") return BuildInfo.revision
+        if (arg === "input") return JSON.stringify(windowLoader.item ? windowLoader.item.inputStatus() : {focused:false,composing:false,length:service ? service.text.length : 0})
         return service && service.ready ? "ready" : "starting"
     }
     function dismiss() { close(); if (shell) shell.hide("lucas.translate") }
@@ -57,26 +59,8 @@ Item {
         }
     }
 
-    PanelWindow {
-        id: window
-        visible: root.opened && root.windowsEnabled
-        screen: Quickshell.screens.find(function(screen) { return Hyprland.focusedMonitor && screen.name === Hyprland.focusedMonitor.name }) || Quickshell.screens[0]
-        anchors { top: true; bottom: true; left: true; right: true }
-        exclusionMode: ExclusionMode.Ignore
-        color: "transparent"
-        WlrLayershell.namespace: "lucas-translate-native"
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-        onVisibleChanged: if (visible) Qt.callLater(function() { if (root.page === "translate") frame.focusInput() })
-
-        Rectangle { anchors.fill: parent; color: Color.menu.scrim }
-        MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
-        PanelContent {
-            id: frame
-            controller: root
-            anchors.centerIn: parent
-            width: Math.min(Style.space(440), window.width - Style.gapsOut * 2)
-            height: Math.min(frame.preferredHeight, window.height - Style.gapsOut * 2)
-        }
-    }
+    Component.onCompleted: loadWindow()
+    onWindowsEnabledChanged: loadWindow()
+    function loadWindow() { windowLoader.setSource(windowsEnabled ? "NativeWindow.qml" : "", windowsEnabled ? {controller:root} : ({})) }
+    Loader { id: windowLoader }
 }

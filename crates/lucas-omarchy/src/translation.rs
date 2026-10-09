@@ -203,6 +203,16 @@ async fn run(
     let mut services = tokio::task::spawn_blocking(move || crate::build_services(&ai, &toggles))
         .await
         .map_err(|_| "加载服务失败")?;
+    let usage = tokio::task::spawn_blocking(config::load_usage)
+        .await
+        .map_err(|_| "读取设置失败")??;
+    services.sort_by_key(|service| {
+        usage
+            .service_order
+            .iter()
+            .position(|name| name == service.name())
+            .unwrap_or(usize::MAX)
+    });
     if let Some(name) = &only {
         services.retain(|s| s.name() == name);
     }
@@ -225,6 +235,7 @@ async fn run(
     );
     let mut tasks = tokio::task::JoinSet::new();
     for service in services {
+        let progress_app = app.clone();
         let request_id = id.to_string();
         let token = token.clone();
         let text = text.clone();
@@ -251,7 +262,16 @@ async fn run(
                 let key=crate::result_cache::Key { identity:service.cache_identity(),text:text.clone(),from:from.clone(),to:target.clone() };
                 if let Some(cached)=crate::result_cache::global().lock().unwrap_or_else(|e|e.into_inner()).get(&key,started) { return cached; }
                 let mut result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||
-                    lucas_core::http::with_cancellation(work_token.clone(), || query(service,&text,&from,&source,&target))))
+                    lucas_core::http::with_cancellation(work_token.clone(), || {
+                        let mut partial=String::new(); let mut last=std::time::Instant::now()-std::time::Duration::from_secs(1);
+                        query_with_progress(service,&text,&from,&source,&target,&mut |delta| {
+                            partial.push_str(delta);
+                            if last.elapsed()>=std::time::Duration::from_millis(40) {
+                                emit(&progress_app,&work_token,&request_id,"delta",json!({"service":name,"text":partial}));
+                                last=std::time::Instant::now();
+                            }
+                        })
+                    })))
                     .unwrap_or_else(|_| failure(&text,&source,&target,name,ServiceError::Internal));
                 if !work_token.is_cancelled() { crate::result_cache::global().lock().unwrap_or_else(|e|e.into_inner()).insert(key,result.clone(),std::time::Instant::now()); }
                 if let Some(info)=result.failure.as_mut(){info.incident_id=Some(uuid::Uuid::new_v4().to_string());}
@@ -263,44 +283,58 @@ async fn run(
             tokio::select! { _ = token.cancelled() => None, r = work => r.ok() }
         });
     }
-    let mut recorded = only.is_some(); // A card retry must not duplicate the query history.
-    let mut history_write = None;
+    let mut results = Vec::new();
     while let Some(result) = tasks.join_next().await {
         if token.is_cancelled() {
             return Ok(());
         }
         if let Ok(Some(result)) = result {
-            emit(app, token, id, "result", json!(result)); // Storage latency must not delay the result.
-            if !recorded && !result.paragraphs.is_empty() {
-                recorded = true;
-                let text = result.text;
-                let translated = result.paragraphs.join("\n");
-                let service = result.service;
-                history_write = Some(tokio::task::spawn_blocking(move || {
-                    db::add_history(&text, &translated, &service)
-                }));
-            }
+            emit(app, token, id, "result", json!(result));
+            results.push(result);
         }
     }
-    if let Some(write) = history_write {
-        if !matches!(write.await, Ok(Ok(()))) {
+    if only.is_none() && usage.history_enabled && !token.is_cancelled() {
+        results.sort_by_key(|result| {
+            usage
+                .service_order
+                .iter()
+                .position(|name| name == &result.service)
+                .unwrap_or(usize::MAX)
+        });
+        let outcome = tokio::task::spawn_blocking(move || {
+            db::add_query(&text, &results)?;
+            db::prune_history(usage.history_days, usage.history_limit)
+        })
+        .await;
+        if !matches!(outcome, Ok(Ok(()))) {
             emit(
                 app,
                 token,
                 id,
                 "warning",
-                json!({"message":"翻译已完成，但历史记录保存失败"}),
+                json!({"message":"翻译已完成，但历史记录保存失败","code":"history_save"}),
             );
         }
     }
     Ok(())
 }
+#[cfg(test)]
 fn query(
     service: Box<dyn TranslateService>,
     text: &str,
     from: &str,
     source: &str,
     to: &str,
+) -> QueryResult {
+    query_with_progress(service, text, from, source, to, &mut |_| {})
+}
+fn query_with_progress(
+    service: Box<dyn TranslateService>,
+    text: &str,
+    from: &str,
+    source: &str,
+    to: &str,
+    on_delta: &mut dyn FnMut(&str),
 ) -> QueryResult {
     if service.name() == "YoudaoDict" && lucas_core::lang::dictionary_eligible(text, from, to) {
         return lucas_core::services::dict_route_with_source(text, from, to)
@@ -313,7 +347,7 @@ fn query(
             })
             .unwrap_or_else(|e| failure(text, source, to, "YoudaoDict", e));
     }
-    match service.translate_with_detection(text, from, to) {
+    match service.translate_stream(text, from, to, on_delta) {
         Ok(output) if output.paragraphs.iter().any(|p| !p.trim().is_empty()) => {
             let provider_source = if from == "auto" {
                 output

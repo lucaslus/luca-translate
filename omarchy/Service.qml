@@ -22,8 +22,20 @@ QtObject {
     property var cards: []
     property var detection: ({})
     property var settings: ({})
+    property var wantedOrder: null
+    property bool orderSaving: false
+    property int orderRevision: 0
+    readonly property var serviceOrder: wantedOrder || (settings.usage && Model.validOrder(settings.usage.service_order) ? settings.usage.service_order : Model.defaultOrder())
+    onServiceOrderChanged: cards = Model.ordered(cards,serviceOrder)
     property var shortcuts: ({shortcuts:{}, conflicts:{}})
     property var pending: ({})
+    property var favoriteStates: ({})
+    property var favoritePending: ({})
+    property var favoriteVersions: ({})
+    property int favoriteRemovalEpoch: 0
+    onCardsChanged: now = Date.now()
+    property double now: Date.now()
+    signal settingsRequested()
     property int commandTimeoutMs: 15000
     property int streamTimeoutMs: 70000
     property double streamDeadline: 0
@@ -58,6 +70,10 @@ QtObject {
     function object(value) { return value !== null && typeof value === "object" && !Array.isArray(value) }
     function strings(value) { return Array.isArray(value) && value.every(function(item) { return typeof item === "string" }) }
     function optionalString(value) { return value === undefined || value === null || typeof value === "string" }
+    function validFailure(value) {
+        return value === undefined || value === null || (object(value) && typeof value.code === "string"
+            && (value.retry_at_ms === undefined || value.retry_at_ms === null || (typeof value.retry_at_ms === "number" && isFinite(value.retry_at_ms) && value.retry_at_ms >= 0)))
+    }
     function validSettings(value) {
         return object(value) && object(value.preferences) && typeof value.preferences.language === "string"
             && object(value.services) && object(value.ai) && object(value.official) && object(value.routing)
@@ -69,11 +85,14 @@ QtObject {
     }
     function validReply(method, value) {
         if (!object(value) && !Array.isArray(value) && typeof value !== "string") return false
-        if (method === "settings" || /^(preferences|routing|ai|official)\.save$/.test(method) || method === "service.set") return validSettings(value)
+        if (method === "settings" || /^(preferences|routing|ai|official|usage)\.save$/.test(method) || method === "service.set") return validSettings(value)
         if (/^shortcuts\./.test(method)) return object(value) && object(value.shortcuts) && object(value.conflicts)
+        if (method === "service.order") return object(value) && Model.validOrder(value.order)
         if (method === "history.list" || method === "favorites.list") return Array.isArray(value) && value.every(function(row) {
             return object(row) && typeof row.id === "number" && typeof row.text === "string" && typeof row.result === "string" && typeof row.service === "string"
+                && (row.details === undefined || (Array.isArray(row.details) && row.details.length <= 8 && row.details.every(function(card) { return object(card) && typeof card.service === "string" && strings(card.paragraphs) && optionalString(card.text) && optionalString(card.error) && validFailure(card.failure) })))
         })
+        if (method === "favorite.status" || method === "favorite.toggle") return object(value) && (value.id === null || (typeof value.id === "number" && isFinite(value.id) && value.id > 0 && Math.floor(value.id) === value.id))
         if (method === "logs.directory") return typeof value === "string"
         if (method === "capture") return object(value) && (value.cancelled === true || value.copied === true || value.handled === true
             || typeof value.text === "string")
@@ -101,7 +120,7 @@ QtObject {
         try { message = JSON.parse(line) } catch (_) { error = tr("unavailable"); return }
         if (!object(message)) { error = tr("unavailable"); return }
         if (message.event === "ready") {
-            if (!object(message.data) || message.data.protocol !== 1) { error = tr("unavailable"); return }
+            if (!object(message.data) || message.data.protocol !== 1 || (manifest && message.data.version !== manifest.version)) { error = tr("unavailable"); return }
             ready = true; failures = 0; error = ""
             refreshSettings()
             refreshShortcuts()
@@ -115,10 +134,11 @@ QtObject {
             if (event.kind === "start") {
                 if (!strings(event.data.services) || event.data.services.length > 8 || new Set(event.data.services).size !== event.data.services.length) { error = tr("unavailable"); return }
                 detection = event.data
-                cards = Model.start(cards, event.data.services, retryService)
+                cards = Model.ordered(Model.start(cards, event.data.services, retryService),serviceOrder)
             } else if (event.kind === "result") {
                 var result = event.data
                 if (typeof result.service !== "string" || !strings(result.paragraphs)
+                    || !validFailure(result.failure)
                     || ![result.text,result.error,result.pinyin,result.detected_from,result.detected_to].every(optionalString)
                     || !cards.some(function(card) { return card.service === result.service && card.pending })
                     || (result.dictionary_help && (!object(result.dictionary_help) || !strings(result.dictionary_help.suggestions)))
@@ -126,6 +146,10 @@ QtObject {
                         || ![result.dict.uk_phonetic,result.dict.us_phonetic,result.dict.uk_speech,result.dict.us_speech].every(optionalString)
                         || !Array.isArray(result.dict.meanings) || !result.dict.meanings.every(strings)))) { error = tr("unavailable"); return }
                 cards = Model.result(cards, result)
+                if (!result.error) syncFavorite(result)
+            } else if (event.kind === "delta") {
+                if (typeof event.data.service !== "string" || typeof event.data.text !== "string" || event.data.text.length > 2000000) { error = tr("unavailable"); return }
+                cards = cards.map(function(card) { return card.service === event.data.service && card.pending ? Object.assign({},card,{paragraphs:event.data.text.split("\n"),streaming:true}) : card })
             } else if (event.kind === "error" || event.kind === "warning") {
                 if (typeof event.data.message !== "string") { error = tr("unavailable"); return }
                 if (event.kind === "error") { error = event.data.message; cards = Model.finish(cards, error) }
@@ -141,15 +165,39 @@ QtObject {
     }
 
     function refreshSettings() {
-        request("settings", {}, function(ok, data) { if (ok) settings = data })
+        var revision=orderRevision
+        request("settings", {}, function(ok, data) { if (ok) applySettings(data,revision) })
+    }
+    function applySettings(data, revision) {
+        if (revision !== orderRevision && settings.usage && data.usage) data=Object.assign({},data,{usage:Object.assign({},data.usage,{service_order:settings.usage.service_order.slice()})})
+        settings=data
+    }
+    function reorderServices(order) {
+        if (!Model.validOrder(order) || JSON.stringify(order)===JSON.stringify(serviceOrder)) return
+        orderRevision++; wantedOrder=order.slice(); flushOrder()
+    }
+    function flushOrder() {
+        if (orderSaving || !wantedOrder) return
+        var sent=wantedOrder.slice()
+        orderSaving=true
+        request("service.order",{order:sent},function(ok,data) {
+            orderSaving=false
+            if (ok) {
+                orderRevision++
+                settings=Object.assign({},settings,{usage:Object.assign({},settings.usage || {},{service_order:data.order.slice()})})
+            }
+            if (JSON.stringify(wantedOrder)===JSON.stringify(sent)) wantedOrder=null
+            flushOrder()
+        })
     }
     function refreshShortcuts() {
         request("shortcuts.status", {}, function(ok, data) { if (ok) shortcuts = data })
     }
     function save(method, params, callback) {
         error = ""; notice = ""
+        var revision=orderRevision
         return request(method, params, function(ok, data) {
-            if (ok) { settings = data; notice = tr("saved") }
+            if (ok) { applySettings(data,revision); notice = tr("saved") }
             if (callback) callback(ok)
         })
     }
@@ -195,9 +243,30 @@ QtObject {
             else if (!ok && shell) shell.summon("lucas.translate", JSON.stringify({action:"error"}))
         })
     }
-    function copy(value) { request("copy", {text:value}, function(ok) { if (ok) notice = tr("copied") }) }
+    function copy(value, callback) { request("copy", {text:value}, function(ok) { if (ok) notice = tr("copied"); if (callback) callback(ok) }) }
+    function favoriteKey(card) { return JSON.stringify([card.text || "",Model.translated(card),card.service]) }
+    function syncFavorite(card) {
+        var key = favoriteKey(card), version=favoriteVersions[key] || 0, removalEpoch=favoriteRemovalEpoch
+        request("favorite.status", {text:card.text || "",result:Model.translated(card),service:card.service}, function(ok,data) {
+            if (ok && removalEpoch===favoriteRemovalEpoch && !favoritePending[key] && (favoriteVersions[key] || 0)===version) { var next=Object.assign({},favoriteStates); next[key]=data.id; var keys=Object.keys(next); while (keys.length>128) delete next[keys.shift()]; favoriteStates=next }
+        })
+    }
     function favorite(card) {
-        request("favorite.add", {text:card.text,result:Model.translated(card),service:card.service}, function(ok) { if (ok) notice = tr("saved") })
+        var key = favoriteKey(card)
+        if (favoritePending[key]) return
+        var versions=Object.assign({},favoriteVersions); versions[key]=(versions[key] || 0)+1; var keys=Object.keys(versions); while (keys.length>128) delete versions[keys.shift()]; favoriteVersions=versions
+        var waiting=Object.assign({},favoritePending); waiting[key]=true; favoritePending=waiting
+        request("favorite.toggle", {text:card.text || "",result:Model.translated(card),service:card.service}, function(ok,data) {
+            var next=Object.assign({},favoritePending); delete next[key]; favoritePending=next
+            if (ok) { var states=Object.assign({},favoriteStates); states[key]=data.id; var keys=Object.keys(states); while (keys.length>128) delete states[keys.shift()]; favoriteStates=states; notice=tr(data.id ? "saved" : "removed") }
+        })
+    }
+    function removeFavorite(id,callback) {
+        favoriteRemovalEpoch++
+        request("favorite.remove",{id:id},function(ok) {
+            if (ok) { var next=Object.assign({},favoriteStates); Object.keys(next).forEach(function(key) { if (next[key]===id) next[key]=null }); favoriteStates=next }
+            if (callback) callback(ok)
+        })
     }
     function reconnect() { failures = 0; if (!backend.running) backend.running = true }
     property Process backend: Process {
@@ -226,5 +295,10 @@ QtObject {
     property Timer restartTimer: Timer {
         interval: Math.min(10000, 1000 * Math.pow(2, root.failures))
         onTriggered: if (!backend.running) backend.running = true
+    }
+    property Timer cooldownTimer: Timer {
+        interval: 1000; repeat: true
+        running: root.cards.some(function(card) { return card.failure && card.failure.retry_at_ms > root.now })
+        onTriggered: root.now = Date.now()
     }
 }

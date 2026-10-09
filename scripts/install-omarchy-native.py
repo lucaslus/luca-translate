@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install only the native Omarchy variant; preserve the Tauri source and data."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,45 @@ def require_unlocked():
         raise RuntimeError('Unlock the desktop before installing or updating a plugin; this Shell version can crash on a plugin reload while locked.')
     if result.returncode != 0 or result.stdout.strip() != 'false':
         raise RuntimeError('Cannot confirm the desktop is unlocked; no plugin files were modified.')
+    monitors = run('hyprctl', '-j', 'monitors', capture_output=True)
+    if not any(not monitor.get('disabled', False) for monitor in json.loads(monitors.stdout)):
+        raise RuntimeError('No active compositor monitor; plugin reload refused.')
+
+
+def stamp_revision(staging, binary):
+    digest = hashlib.sha256()
+    for path in sorted(staging.rglob('*')):
+        if path.is_file() and path.name != 'BuildInfo.js':
+            digest.update(str(path.relative_to(staging)).encode() + b'\0')
+            digest.update(path.read_bytes() + b'\0')
+    digest.update(binary.read_bytes())
+    revision = digest.hexdigest()
+    (staging / 'BuildInfo.js').write_text('var revision = ' + json.dumps(revision) + '\n')
+    return revision
+
+
+def wait_ready():
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        health = run('omarchy-shell', 'shell', 'call', PLUGIN_ID, 'health', '', capture_output=True).stdout.strip()
+        if health == 'ready':
+            return
+        time.sleep(0.2)
+    raise RuntimeError('Native panel or backend did not become ready; installation rolled back.')
+
+
+def verify_revision(expected):
+    wait_ready()
+    def loaded():
+        return run('omarchy-shell', 'shell', 'call', PLUGIN_ID, 'health', 'revision', capture_output=True).stdout.strip()
+    if loaded() == expected:
+        return
+    # This Shell can retain QML/JS caches after rescanPlugins and enable/disable.
+    require_unlocked()
+    run('omarchy', 'restart', 'shell', capture_output=True)
+    wait_ready()
+    if loaded() != expected:
+        raise RuntimeError('Shell is still running an outdated native UI; installation rolled back.')
 
 
 def backup(path, destination):
@@ -36,6 +76,7 @@ def backup(path, destination):
 
 
 def restore(paths, saved):
+    require_unlocked()
     # Roll back only files managed by this installer.
     for path, name in paths:
         previous = saved / name
@@ -106,7 +147,9 @@ def install(binary, config, target, destination, desktop, without_shortcuts):
     with tempfile.TemporaryDirectory(prefix='lucas-native-install-', dir=target.parent.parent) as directory:
         staging = Path(directory) / PLUGIN_ID
         shutil.copytree(ROOT / 'omarchy', staging, ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc'))
+        revision = stamp_revision(staging, binary)
         run('omarchy', 'plugin', 'validate', str(staging))
+        require_unlocked()
         run('omarchy-shell', 'shell', 'setPluginEnabled', PLUGIN_ID, 'false', capture_output=True)
         if target.exists():
             shutil.rmtree(target)
@@ -122,6 +165,7 @@ def install(binary, config, target, destination, desktop, without_shortcuts):
     desktop.parent.mkdir(parents=True, exist_ok=True)
     desktop.write_text('[Desktop Entry]\nType=Application\nName=Lucas Translate\nComment=Native Omarchy translation and local OCR\n'
                        f'Exec={destination / "lucas-translate"} --show\nIcon=lucas-translate\nTerminal=false\nCategories=Utility;\n')
+    require_unlocked()
     run('omarchy-shell', 'shell', 'rescanPlugins', capture_output=True)
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -134,14 +178,7 @@ def install(binary, config, target, destination, desktop, without_shortcuts):
     enabled = run('omarchy-shell', 'shell', 'setPluginEnabled', PLUGIN_ID, 'true', capture_output=True).stdout.strip()
     if enabled != 'ok':
         raise RuntimeError('Shell refused to enable the native plugin; installation rolled back.')
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        health = run('omarchy-shell', 'shell', 'call', PLUGIN_ID, 'health', '', capture_output=True).stdout.strip()
-        if health == 'ready':
-            break
-        time.sleep(0.2)
-    else:
-        raise RuntimeError('Native panel or backend did not become ready; installation rolled back.')
+    verify_revision(revision)
     if not without_shortcuts:
         run('python3', str(target / 'scripts/shortcuts.py'))
         run('hyprctl', 'reload', capture_output=True)

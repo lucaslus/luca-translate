@@ -53,12 +53,11 @@ DeepL 官方连接测试仅调用 [`GET /v2/usage`](https://developers.deepl.com
 ### 第三梯队（规划，用户自申密钥）
 火山 / 腾讯 / 百度 / 阿里 / 有道开放平台 等，设计上通过统一 `TranslateService` trait 接入，UI 展示顺序可拖拽排序（对齐 Bob）。
 
-## 拼音方案
+## 拼音数据兼容
 
 - 依赖 `rust-pinyin`（pinyin crate 0.10），字级转换带声调（`nǐ hǎo`）；
 - 触发条件：原文或译文包含汉字（统一简繁处理）；
-- 展示：翻译窗口中的高亮拼音行；
-- 规划增强：多音字词组校正（rust-pinyin 支持词组拼音 `to_pinyin_multi`）。
+- 结果数据保留拼音字段，Omarchy、macOS、Windows 与普通 Linux 的界面均不展示拼音。
 
 ## 划词策略（参考 Easydict + 增强）
 

@@ -24,7 +24,7 @@ class Integration(unittest.TestCase):
             self.assertEqual(arguments[:3],['shell','summon','lucas.translate'])
             self.assertEqual(json.loads(arguments[3]),{'action':'selection','source':{key:source[key] for key in ['address','pid','class']}})
 
-    def installer_fixture(self, failure=None, initially_installed=True):
+    def installer_fixture(self, failure=None, initially_installed=True, stale_ui=False):
         """Run the actual transaction with every Shell/Hyprland command intercepted."""
         spec = importlib.util.spec_from_file_location('native_installer', ROOT / 'scripts/install-omarchy-native.py')
         installer = importlib.util.module_from_spec(spec); spec.loader.exec_module(installer)
@@ -49,9 +49,9 @@ class Integration(unittest.TestCase):
             else:
                 (config / 'hypr').mkdir(parents=True); (config / 'hypr/hyprland.lua').write_text('original hyprland.lua')
             previous = {name: ('old plugin' if name == 'plugin' else path.read_text()) for path, name in paths if path.exists()}
-            listed = 0; calls = []
+            listed = 0; calls = []; restarted = False
             def run(*arguments, **options):
-                nonlocal listed
+                nonlocal listed, restarted
                 calls.append(arguments)
                 output = 'ok'
                 if arguments[:3] == ('omarchy-shell', 'shell', 'setPluginEnabled'):
@@ -64,7 +64,11 @@ class Integration(unittest.TestCase):
                 if arguments[:3] == ('omarchy-shell', 'shell', 'listPlugins'):
                     listed += 1
                     output = 'not json' if failure == 'discover' else json.dumps([{'id':'lucas.translate', 'enabled':not (failure == 'final' and listed > 1)}])
-                if arguments[:3] == ('omarchy-shell', 'shell', 'call'): output = 'ready'
+                if arguments[:3] == ('omarchy-shell', 'shell', 'call'):
+                    output = 'ready'
+                    if arguments[-1] == 'revision':
+                        output = 'old cached UI' if failure == 'revision' or (stale_ui and not restarted) else json.loads((target / 'BuildInfo.js').read_text().split('=', 1)[1])
+                if arguments[:3] == ('omarchy', 'restart', 'shell'): restarted = True
                 if arguments[:2] == ('hyprctl', 'configerrors'): output = 'invalid config' if failure == 'shortcuts' else ''
                 return subprocess.CompletedProcess(arguments, 0, stdout=output, stderr='')
             environment = dict(HOME=str(home),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(home / '.local/share'),
@@ -90,9 +94,31 @@ class Integration(unittest.TestCase):
                     self.assertEqual(len(backups), 1)
                     self.assertEqual((backups[0] / 'hyprland.lua').read_text(), 'original hyprland.lua')
                 self.assertTrue(all(str(home) in str(path) for path, _ in paths))
+                self.assertEqual(restarted, stale_ui or failure == 'revision')
 
     def test_installer_success_preserves_backup_and_excludes_fixtures(self):
         self.installer_fixture()
+
+    def test_installer_restarts_shell_when_ready_panel_has_stale_qml(self):
+        self.installer_fixture(stale_ui=True)
+
+    def test_installer_rejects_stale_ui_even_after_restart(self):
+        self.installer_fixture('revision')
+
+    def test_installed_revision_changes_with_ui_and_backend(self):
+        spec = importlib.util.spec_from_file_location('native_installer', ROOT / 'scripts/install-omarchy-native.py')
+        installer = importlib.util.module_from_spec(spec); spec.loader.exec_module(installer)
+        with tempfile.TemporaryDirectory() as directory:
+            staging = Path(directory) / 'plugin'; staging.mkdir()
+            ui = staging / 'Panel.qml'; ui.write_text('old UI')
+            binary = Path(directory) / 'backend'; binary.write_bytes(b'old backend')
+            first = installer.stamp_revision(staging, binary)
+            self.assertEqual(first, installer.stamp_revision(staging, binary))
+            ui.write_text('new UI')
+            second = installer.stamp_revision(staging, binary)
+            self.assertNotEqual(first, second)
+            binary.write_bytes(b'new backend')
+            self.assertNotEqual(second, installer.stamp_revision(staging, binary))
 
     def test_installer_rolls_back_existing_resources_at_each_failure(self):
         for failure in ['validate','rescan','discover','enable','shortcuts','final']:
@@ -147,8 +173,14 @@ class Integration(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     installer.require_unlocked()
         with patch.object(installer.subprocess, 'run',
-                return_value=subprocess.CompletedProcess([], 0, stdout='false\n', stderr='')):
+                return_value=subprocess.CompletedProcess([], 0, stdout='false\n', stderr='')), \
+                patch.object(installer, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='[{"disabled":false}]', stderr='')):
             installer.require_unlocked()
+        with patch.object(installer.subprocess, 'run',
+                return_value=subprocess.CompletedProcess([], 0, stdout='false\n', stderr='')), \
+                patch.object(installer, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='[]', stderr='')):
+            with self.assertRaises(RuntimeError):
+                installer.require_unlocked()
 
 
 if __name__ == '__main__':

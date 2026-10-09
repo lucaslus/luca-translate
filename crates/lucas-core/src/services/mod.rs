@@ -75,6 +75,16 @@ pub trait TranslateService: Send + Sync {
         self.translate(text, from, to)
             .map(TranslationOutput::paragraphs)
     }
+    /// Incremental text is optional; existing services retain their complete-response behavior.
+    fn translate_stream(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+        _on_delta: &mut dyn FnMut(&str),
+    ) -> Result<TranslationOutput, ServiceError> {
+        self.translate_with_detection(text, from, to)
+    }
     fn detect(&self, text: &str) -> String {
         lang::detect_source(text).to_string()
     }

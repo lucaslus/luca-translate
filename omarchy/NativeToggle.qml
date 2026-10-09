@@ -1,8 +1,10 @@
 import QtQuick
 import qs.Commons
 import qs.Ui as Ui
+import "Typography.js" as Typography
 
 Ui.Toggle {
+    fontFamily: Typography.family
     id: root
     property bool rowHovered: false
     foreground: Color.popups.text

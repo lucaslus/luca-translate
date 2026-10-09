@@ -1,5 +1,16 @@
 .pragma library
 
+function defaultOrder() { return ["YoudaoDict","DeepLApi","AI","Bing","DeepLFree","GoogleFree"] }
+function validOrder(order) {
+    return Array.isArray(order) && order.length === 6 && defaultOrder().every(function(provider) { return order.filter(function(item) { return item === provider }).length === 1 })
+}
+function ordered(cards, order) {
+    return (cards || []).slice().sort(function(a,b) {
+        var left=order.indexOf(a.service), right=order.indexOf(b.service)
+        return (left<0 ? order.length : left) - (right<0 ? order.length : right)
+    })
+}
+
 function providerBrand(provider) {
     var name = String(provider || "").toLowerCase()
     if (["youdao", "youdaodict", "youdaotranslate"].indexOf(name) >= 0) return "youdao"
@@ -30,7 +41,7 @@ function result(cards, value) {
     var next = cards.map(function(card) {
         if (card.service !== value.service) return card
         replaced = true
-        return Object.assign({}, value, {pending: false})
+        return Object.assign({}, value, {pending: false}, value.error && card.streaming ? {paragraphs:card.paragraphs,partial:true} : {})
     })
     if (!replaced) next.push(Object.assign({}, value, {pending: false}))
     return next
@@ -38,7 +49,7 @@ function result(cards, value) {
 
 function finish(cards, message) {
     return cards.map(function(card) {
-        return card.pending ? Object.assign({}, card, {pending: false, error: message}) : card
+        return card.pending ? Object.assign({}, card, {pending: false, error: message,partial:!!card.streaming}) : card
     })
 }
 

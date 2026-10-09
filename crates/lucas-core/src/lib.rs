@@ -11,6 +11,8 @@
 pub mod lang;
 pub mod paragraph;
 pub mod pinyin;
+pub mod provider_guard;
+pub mod result_cache;
 pub mod services;
 pub mod tts;
 

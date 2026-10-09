@@ -7,3 +7,5 @@ dist
 app/src-tauri/gen/
 *.key
 *.key.pub
+__pycache__/
+*.py[cod]

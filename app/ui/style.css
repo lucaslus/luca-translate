@@ -71,7 +71,6 @@ html[data-theme="light"], html:not([data-theme]) {
   --accent: #ad5709;
   --on-accent: #ffffff;
   --accent-soft: rgba(201, 106, 16, 0.09);
-  --pinyin: #a07d54;
   --danger: #d64545;
   --ok: #3d9a50;
   --skeleton: linear-gradient(100deg, #f1f0ee 40%, #faf9f7 50%, #f1f0ee 60%);
@@ -91,7 +90,6 @@ html[data-theme="dark"] {
   --accent: #ffa94d;
   --on-accent: #201b16;
   --accent-soft: rgba(255, 169, 77, 0.12);
-  --pinyin: #c9a876;
   --danger: #ff6b61;
   --ok: #4cc06a;
   --skeleton: linear-gradient(100deg, #26262a 40%, #303036 50%, #26262a 60%);
@@ -464,18 +462,6 @@ body.omarchy .titlebar { display: none; }
   padding-top: 1px;
 }
 
-/* 词典卡内的拼音行 */
-.dict-pinyin { /* reserved */
-  display: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--pinyin);
-  letter-spacing: 0.04em;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border);
-}
-
 /* ---------- 服务卡 ---------- */
 .svc {
   border: 1px solid var(--border);
@@ -529,19 +515,6 @@ body.omarchy .titlebar { display: none; }
   user-select: text;
 }
 .svc-body p + p { margin-top: 6px; }
-
-/* 句子结果上的拼音行 */
-.pinyin-row {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--pinyin);
-  letter-spacing: 0.05em;
-  padding: 7px 12px;
-  margin-bottom: 8px;
-  background: var(--bg-sunken);
-  border-radius: var(--r-card);
-  border-left: 2px solid var(--pinyin);
-}
 
 /* ---------- 底栏 ---------- */
 .statusbar {
@@ -823,9 +796,6 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .svc:focus-within .copy-btn, .svc:hover .copy-btn { opacity: 1; }
 .svc-body p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--reading-size); }
 #input { font-size: var(--reading-size); }
-.pinyin-details { margin-top: 10px; font-size: 12px; color: var(--text-2); }
-.pinyin-details summary { cursor: pointer; }
-.pinyin-details p { font-size: 12px; }
 .action-card .desc { white-space: pre-line; overflow-wrap: anywhere; }
 .statusbar .error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .statusbar #cancel-work { padding: 2px 8px; font-size: 11px; }

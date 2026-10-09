@@ -70,6 +70,48 @@ impl Request {
     pub fn send_json<T: Serialize + ?Sized>(self, value: &T) -> Result<Response, ServiceError> {
         execute(self.0.json(value), self.1)
     }
+    /// Consume an SSE response incrementally with the same cancellation and body bounds.
+    pub fn send_stream<T: Serialize + ?Sized>(
+        self,
+        value: &T,
+        on_data: &mut dyn FnMut(&str) -> Result<bool, ServiceError>,
+    ) -> Result<(), ServiceError> {
+        let runtime = runtime();
+        let token = TOKEN.with(|slot| slot.borrow().clone()).unwrap_or_default();
+        runtime.block_on(async {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => Err(ServiceError::Cancelled),
+                result = tokio::time::timeout(self.1, async {
+                    let mut response=self.0.json(value).send().await.map_err(network_error)?;
+                    if !response.status().is_success() {
+                        return Err(ServiceError::Http { status:response.status().as_u16(),retry_after_secs:response.headers().get("retry-after").and_then(|v|v.to_str().ok()).and_then(|v|crate::services::retry_after(v,std::time::SystemTime::now())) });
+                    }
+                    let sse=response.headers().get("content-type").and_then(|v|v.to_str().ok()).is_some_and(|v|v.starts_with("text/event-stream"));
+                    let mut pending=Vec::new(); let mut total=0usize; let mut event=String::new();
+                    while let Some(chunk)=response.chunk().await.map_err(network_error)? {
+                        total=total.saturating_add(chunk.len());
+                        if total>MAX_BODY { return Err(ServiceError::Parse(String::new())); }
+                        pending.extend_from_slice(&chunk);
+                        if !sse { continue; }
+                        while let Some(end)=pending.iter().position(|b|*b==b'\n') {
+                            let line=pending.drain(..=end).collect::<Vec<_>>();
+                            let line=std::str::from_utf8(&line).map_err(|_|ServiceError::Parse(String::new()))?.trim_end_matches(['\r','\n']);
+                            if line.is_empty() {
+                                if !event.is_empty() { if on_data(&event)? { return Ok(()); } event.clear(); }
+                            } else if let Some(data)=line.strip_prefix("data:") {
+                                if !event.is_empty() { event.push('\n'); }
+                                event.push_str(data.strip_prefix(' ').unwrap_or(data));
+                            }
+                        }
+                    }
+                    if !sse { let body=String::from_utf8(pending).map_err(|_|ServiceError::Parse(String::new()))?; on_data(&body)?; return Ok(()); }
+                    // A stream is complete only after its terminal frame, never at an unexpected EOF.
+                    Err(ServiceError::Parse(String::new()))
+                }) => result.unwrap_or(Err(ServiceError::Timeout)),
+            }
+        })
+    }
     pub fn send_form(self, values: &[(&str, &str)]) -> Result<Response, ServiceError> {
         execute(self.0.form(values), self.1)
     }
@@ -99,15 +141,18 @@ fn network_error(error: reqwest::Error) -> ServiceError {
         ServiceError::Network(String::new())
     }
 }
-fn execute(request: reqwest::RequestBuilder, timeout: Duration) -> Result<Response, ServiceError> {
+fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    let runtime = RUNTIME.get_or_init(|| {
+    RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .build()
             .expect("HTTP runtime")
-    });
+    })
+}
+fn execute(request: reqwest::RequestBuilder, timeout: Duration) -> Result<Response, ServiceError> {
+    let runtime = runtime();
     let token = TOKEN.with(|slot| slot.borrow().clone()).unwrap_or_default();
     runtime.block_on(async {
         tokio::select! {

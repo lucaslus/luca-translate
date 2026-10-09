@@ -26,3 +26,43 @@ jobs:
           name: omarchy-native
           path: dist/omarchy/*
           if-no-files-found: error
+  native-ui:
+    needs: backend
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    env:
+      OMARCHY_PATH: /tmp/omarchy-runtime
+      QT_QPA_PLATFORM: offscreen
+      QSG_RHI_BACKEND: opengl
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      XDG_RUNTIME_DIR: /tmp/lucas-runtime
+      LUCAS_NATIVE_BACKEND: /tmp/native-bundle/lucas-translate-omarchy/bin/lucas-translate-omarchy-backend
+    steps:
+      - name: Install native UI runtime
+        run: pacman -Syu --noconfirm git python quickshell mesa dbus ttf-dejavu
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: omarchy-native
+          path: /tmp/native-artifact
+      - name: Prepare pinned Omarchy components and backend
+        run: |
+          mkdir -m700 -p "$XDG_RUNTIME_DIR" /tmp/native-bundle
+          tar -xzf /tmp/native-artifact/lucas-translate-omarchy-*-x86_64.tar.gz -C /tmp/native-bundle
+          git init "$OMARCHY_PATH"
+          git -C "$OMARCHY_PATH" remote add origin https://github.com/omacom/omarchy.git
+          git -C "$OMARCHY_PATH" fetch --depth 1 origin c352b62d67456f56ca898d0e23effc1b20c25ca6
+          git -C "$OMARCHY_PATH" checkout --detach FETCH_HEAD
+          quickshell --version
+          pacman -Q qt6-base qt6-declarative
+      - name: Native components, themes and rendered previews
+        run: dbus-run-session -- python3 -B scripts/test-omarchy-native.py
+      - name: Native UI interactions and stress
+        run: dbus-run-session -- python3 -B scripts/test-omarchy-ui.py
+      - name: QML and Rust integration
+        run: dbus-run-session -- python3 -B scripts/test-omarchy-bridge.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omarchy-native-ui-results
+          path: dist/omarchy/

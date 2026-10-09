@@ -1,8 +1,7 @@
 import QtQuick
 import qs.Commons
-import qs.Ui as Ui
 
-Ui.Button {
+NativeButton {
     id: root
     property string name: ""
     property bool filled: false

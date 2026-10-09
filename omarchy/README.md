@@ -7,8 +7,11 @@ The native build has no Tauri or WebView dependency.
 The interface binds to the installed Shell's `qs.Commons.Color`, `Style` and
 `Border` and uses `qs.Ui` controls. There is no application theme, Dark/Light
 selector or stored native theme preference. Theme changes update the open panel
-without replacing its input, results or running requests. Fonts, spacing and
+without replacing its input, results or running requests. Font sizes, spacing and
 surface styling follow the Shell's effective settings, including user overrides.
+All native text and controls use the desktop's `sans-serif` fontconfig alias,
+including language fallbacks, rather than the Shell bar's monospace font. The
+family is defined centrally in `Typography.js`; no font is bundled or installed.
 The compact panel is 440 logical pixels wide at the default Shell scale, with
 a short empty state that expands for results. The title-free toolbar uses uniform vector icons for history, favorites and
 settings, with named navigation tooltips; result sections use separators rather than nested
@@ -17,7 +20,7 @@ available for copy and favorites. Copy and favorite actions use icon buttons wit
 tooltips; saved favorites show a filled star. An overflow fade and downward icon
 appear only while additional translations remain below the viewport; clicking the
 icon advances the results and reaching the bottom hides it. Settings use compact
-switches with provider toggles arranged in two columns. Secondary text retains
+switches with provider toggles in a vertical list with drag handles. Secondary text retains
 the theme's muted color when readable, otherwise
 blending it toward the theme's popup text to reach 4.5:1 contrast when that text
 color supports it. This also covers input placeholders and metadata. Language controls and the Clear/Translate icons share one row between
@@ -40,9 +43,10 @@ their switches are enabled.
 
 Unlock the desktop before installing or updating the plugin. The locally
 installed Shell can abort when plugin changes reload a locked session; the
-installer checks the lock IPC before modifying files.
-If an installed Shell retains cached QML after an update, run
-`omarchy restart shell` while the desktop is unlocked to load the new components.
+installer checks the lock IPC and active compositor before modifying files.
+It verifies the running panel's revision against a digest of the installed QML,
+scripts and backend. If the Shell retains cached QML after an update, it restarts
+the unlocked Shell once and checks the revision again before reporting success.
 
 From the repository root:
 
@@ -54,7 +58,7 @@ The installer builds only `crates/lucas-omarchy`, backs up the previous desktop
 configuration, installs `~/.config/omarchy/plugins/lucas.translate`, installs the
 backend and launcher to `~/.local/bin`, adds the bar entry, and switches the six
 existing shortcuts to the native launcher. It checks actual discovery and
-backend readiness before switching shortcuts, validates the compositor reload,
+backend readiness and the loaded UI revision before switching shortcuts, validates the compositor reload,
 and restores managed files if installation fails. Occupied shortcuts are left
 unassigned and reported in native Settings.
 
@@ -124,12 +128,23 @@ and delayed key-up sequence.
 Settings includes service toggles, language routing, local/OpenAI-compatible AI,
 DeepL API with a saved-key connection test, interface language, editable ordered
 language rules, desktop shortcuts and a local diagnostics entry. Appearance is always managed
-by Omarchy. History and favorites support paging, copy and retranslating; history
+by Omarchy. History supports search and expanding all provider results. History and favorites support paging, copy, toggling saved state and retranslating; history
 deletion requires a second confirmation. Dictionary text and results are rendered
 as plain text, including markup-like provider content.
 
 Language rules can be added, removed and reordered, and are saved explicitly;
-unrelated settings refreshes preserve unfinished rule edits. Native shortcuts
+unrelated settings refreshes preserve unfinished rule, shortcut and AI field edits.
+The six service switches form one vertical list. Drag a row's handle to reorder;
+dropping saves immediately and reorders current and future translation cards,
+including single-service retries. The focused handle also supports Up/Down keys.
+Cancelled drags do not save; failed saves restore the persisted order, and quick
+successive moves retain the latest order. Disabled services keep their position.
+History storage, retention days, record limits and OCR line cleanup are saved
+explicitly. Retention defaults to unlimited and OCR cleanup is disabled by default.
+AI responses stream incrementally and can be cancelled; interrupted responses
+are not saved as successful history.
+
+Within the panel, Ctrl+Up/Down selects a result, Ctrl+Shift+C copies it and Ctrl+L focuses and selects the input. Native shortcuts
 use the existing managed Hyprland combinations, including saved custom values;
 the settings editor currently accepts combination text instead of key recording.
 Plugin enablement and startup are controlled by Omarchy Shell, replacing the
@@ -149,7 +164,7 @@ Native keys use a separate Secret Service namespace. Imported desktop key ids
 are copied into that namespace on first use; replacing or clearing a native key
 does not delete the original desktop credential.
 
-The backend reuses the unchanged `lucas-core`. Its host modules were adapted from
+The backend reuses `lucas-core`, including shared provider cooldowns, request slots and result caching. Its host modules were adapted from
 the desktop implementation into a separate crate, so the native runtime can be
 rebuilt without changing the Tauri host. Improvements common to both variants
 should subsequently be extracted deliberately rather than changing the desktop
@@ -178,9 +193,7 @@ Backend tests use a local HTTP fixture and fake clipboard/capture tools; they
 do not call public providers or modify the real clipboard. The QML test loads
 actual Shell components in a temporary, windowless test configuration and
 checks theme changes, delayed service injection, stale-result rejection and
-preservation of input/results/running requests. CI runs backend and shortcut
-checks; QML verification additionally requires the installed Omarchy modules
-and Qt Test. The interaction runner sends mouse and keyboard events to the
+preservation of input/results/running requests. CI runs backend, shortcut, component, interaction and bridge checks, using a pinned Omarchy source revision for the UI modules and an Arch Qt/Quickshell runtime. The interaction runner sends mouse and keyboard events to the
 actual controls in an offscreen Mesa window. The bridge runner additionally
 connects the actual QML service to the Rust binary and a localhost provider.
 Capture, OCR and clipboard executables are replaced with isolated fixtures.

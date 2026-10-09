@@ -309,15 +309,6 @@ function card(r) {
       body.append(suggestions);
     }
   }
-  if (!failed && r.pinyin)
-    body.append(
-      el(
-        "details",
-        { class: "pinyin-details" },
-        el("summary", { text: "拼音" }),
-        el("p", { text: r.pinyin }),
-      ),
-    );
   section.append(head, body);
   return section;
 }
