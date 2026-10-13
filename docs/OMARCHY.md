@@ -1,5 +1,7 @@
 # Omarchy / Hyprland 浮动翻译面板
 
+> 本文介绍本仓库 Tauri 桌面版的 Omarchy / Hyprland 集成。QML 原生版已迁移至 [lucas-translate-omarchy](https://github.com/lucaslus/lucas-translate-omarchy)，请在新仓库查看原生版的安装与开发说明。
+
 适用于使用 Lua 配置的 Omarchy / Hyprland。Arch 包附带配置，不会在 pacman 安装时自动改写个人桌面配置。
 
 安装包后，从应用菜单打开一次 Lucas Translate，程序会以当前用户自动启用集成；配置没有变化时不会重复改写或重载。自动启用失败会显示错误，解决后可手动重试（不用 sudo）：
