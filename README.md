@@ -11,7 +11,7 @@
 
 面向 macOS、Windows 和 Linux 的**开源 Bob Translate 平替**。划词翻译、截图 OCR、AI 翻译和查词，一个桌面工具完成。基于 Rust + Tauri 2 构建。
 
-**Omarchy 原生版本**：独立的 QML Shell 插件与 Rust 后端，翻译、设置、历史、收藏及截图标注整体跟随 Omarchy 主题，不提供应用内 Dark / Light。源码安装、构建和验证见 [原生插件说明](omarchy/README.md)。macOS、Windows 和普通 Linux 继续使用现有 Tauri 版本。
+**Omarchy 原生版本已独立到 [lucas-translate-omarchy](https://github.com/lucaslus/lucas-translate-omarchy)**：基于 QML / Qt Quick 与独立 Rust 后端，界面跟随 Omarchy 主题，无 Tauri / WebView 依赖。原生版的源码、安装、测试及发布均在新仓库维护。本仓库继续维护 macOS、Windows 和 Linux 的 Tauri 桌面版及已有 Hyprland 集成。
 
 - **翻译对照**：划词、输入、截图翻译，多渠道并行，失败可单独重试。
 - **截图取字**：本地离线 OCR，静默模式直接复制文字，不弹翻译窗口。
@@ -22,6 +22,8 @@
 **隐私**：图片不上传，翻译文字仅发送给已启用的服务；静默 OCR 不调用翻译。API Key 存于系统凭据存储。免费网页通道的可用性受网络和服务商限流影响。
 
 ## English
+
+The native Omarchy plugin now lives in [lucas-translate-omarchy](https://github.com/lucaslus/lucas-translate-omarchy). This repository maintains the Tauri desktop app for macOS, Windows and Linux.
 
 An **open-source Bob Translate alternative** for macOS, Windows, and Linux. Text translation, screenshot OCR, AI translation, and dictionary lookups in one desktop app, built with Rust and Tauri 2.
 
